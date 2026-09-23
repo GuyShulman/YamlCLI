@@ -26,6 +26,9 @@ public class StepRunner
     /// </summary>
     public async Task<bool> RunAsync(List<StepDefinition> steps, ExecutionContext context)
     {
+        context.Registry = _registry;
+        context.Console = _console;
+
         _console.Header("YAML Action Runner");
 
         var totalSteps = steps.Count;

@@ -1,15 +1,23 @@
+using System.Collections.Concurrent;
+using System.Text.RegularExpressions;
+using YamlCLI.Actions;
+using YamlCLI.Execution;
+
 namespace YamlCLI.Models;
 
 /// <summary>
 /// Holds the runtime state shared across all step executions.
-/// Contains variables, configuration flags, and the console writer for output.
+/// Contains variables, configuration flags, the console writer, and action registry.
 /// </summary>
 public class ExecutionContext
 {
+    private ActionRegistry? _registry;
+    private ConsoleWriter? _console;
+
     /// <summary>
-    /// Variables set by 'set-var' actions and available for interpolation and expressions.
+    /// Thread-safe variables set by 'set-var' actions and available for interpolation and expressions.
     /// </summary>
-    public Dictionary<string, object> Variables { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public ConcurrentDictionary<string, object> Variables { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// When true, enables verbose output (detailed step execution info).
@@ -26,6 +34,55 @@ public class ExecutionContext
     /// Set to the directory containing the input YAML file.
     /// </summary>
     public string BasePath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The action registry used to resolve and execute steps.
+    /// </summary>
+    public ActionRegistry Registry
+    {
+        get => _registry ??= new ActionRegistry();
+        set => _registry = value;
+    }
+
+    /// <summary>
+    /// The console writer used for formatted terminal output.
+    /// </summary>
+    public ConsoleWriter Console
+    {
+        get => _console ??= new ConsoleWriter();
+        set => _console = value;
+    }
+
+    /// <summary>
+    /// Executes a single step using the configured ActionRegistry.
+    /// </summary>
+    public async Task ExecuteStepAsync(StepDefinition step)
+    {
+        if (IsDryRun)
+        {
+            Console.Message($"  [nested dry-run] {step.Action}");
+            return;
+        }
+
+        var action = Registry.GetAction(step.Action);
+        if (IsVerbose)
+        {
+            Console.Info($"Executing nested {step.Action}: {step}");
+        }
+
+        await action.ExecuteAsync(step, this);
+    }
+
+    /// <summary>
+    /// Executes a list of steps in sequence.
+    /// </summary>
+    public async Task ExecuteStepsAsync(List<StepDefinition> steps)
+    {
+        foreach (var step in steps)
+        {
+            await ExecuteStepAsync(step);
+        }
+    }
 
     /// <summary>
     /// Sets a variable in the execution context.
@@ -61,7 +118,7 @@ public class ExecutionContext
     {
         if (string.IsNullOrEmpty(input)) return input;
 
-        return System.Text.RegularExpressions.Regex.Replace(input, @"\$\{(\w+)\}", match =>
+        return Regex.Replace(input, @"\$\{(\w+)\}", match =>
         {
             var varName = match.Groups[1].Value;
             if (Variables.TryGetValue(varName, out var value))

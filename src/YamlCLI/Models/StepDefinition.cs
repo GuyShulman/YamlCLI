@@ -83,6 +83,24 @@ public class StepDefinition
         return value as StepDefinition;
     }
 
+    /// <summary>
+    /// Gets a list of step definitions from a property, accepting either a list or a single step.
+    /// Returns an empty list if missing.
+    /// </summary>
+    public List<StepDefinition> GetSteps(string key)
+    {
+        if (!Properties.TryGetValue(key, out var value) || value == null)
+            return new List<StepDefinition>();
+
+        if (value is List<StepDefinition> list)
+            return list;
+
+        if (value is StepDefinition single)
+            return new List<StepDefinition> { single };
+
+        return new List<StepDefinition>();
+    }
+
     public override string ToString()
     {
         var props = string.Join(", ", Properties.Select(p => $"{p.Key}={p.Value}"));

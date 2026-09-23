@@ -25,14 +25,12 @@ public class AssertAction : IStepAction
     public Task ExecuteAsync(StepDefinition step, ExecutionContext context)
     {
         var condition = step.GetRequiredString("condition");
-        var interpolated = SubstituteVariables(condition, context);
 
         Console.WriteLine($"    Evaluating: {condition}");
 
         try
         {
-            // Use Dynamic LINQ to evaluate the expression
-            var result = EvaluateExpression(interpolated);
+            var result = Execution.ConditionEvaluator.Evaluate(condition, context);
 
             if (result)
             {
@@ -53,56 +51,5 @@ public class AssertAction : IStepAction
         }
 
         return Task.CompletedTask;
-    }
-
-    /// <summary>
-    /// Substitutes variable names in the expression with their values from the context.
-    /// Handles numeric, boolean, and string values appropriately.
-    /// </summary>
-    private string SubstituteVariables(string expression, ExecutionContext context)
-    {
-        var result = expression;
-
-        foreach (var kvp in context.Variables)
-        {
-            var placeholder = kvp.Key;
-            var value = kvp.Value;
-
-            // Replace variable references with their values
-            // Use word boundary matching to avoid partial replacements
-            var pattern = $@"\b{System.Text.RegularExpressions.Regex.Escape(placeholder)}\b";
-            var replacement = FormatValueForExpression(value);
-            result = System.Text.RegularExpressions.Regex.Replace(result, pattern, replacement);
-        }
-
-        return result;
-    }
-
-    /// <summary>
-    /// Formats a value for use in an expression string.
-    /// </summary>
-    private string FormatValueForExpression(object value)
-    {
-        return value switch
-        {
-            bool b => b.ToString().ToLowerInvariant(),
-            int or long or float or double or decimal => value.ToString()!,
-            string s when int.TryParse(s, out _) => s,
-            string s when double.TryParse(s, out _) => s,
-            string s when bool.TryParse(s, out var b) => b.ToString().ToLowerInvariant(),
-            string s => $"\"{s}\"",
-            _ => $"\"{value}\""
-        };
-    }
-
-    /// <summary>
-    /// Evaluates a boolean expression using Dynamic LINQ.
-    /// </summary>
-    private bool EvaluateExpression(string expression)
-    {
-        // Create an empty queryable to use Dynamic LINQ's expression parser
-        var source = new[] { 0 }.AsQueryable();
-        var result = source.Where($"1 == 1 && ({expression})").Any();
-        return result;
     }
 }
