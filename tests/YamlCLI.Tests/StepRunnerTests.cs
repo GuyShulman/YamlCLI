@@ -93,15 +93,6 @@ public class StepRunnerTests
     [Fact]
     public async Task RunAsync_EmptySteps_ReturnsSuccess()
     {
-        var yaml = """
-            steps: []
-            """;
-
-        // Empty steps list will parse but be empty
-        var parser = new YamlParser();
-
-        // This should throw because [] deserializes differently
-        // Let's test with a yaml that gives an empty list
         var registry = new ActionRegistry();
         var console = new ConsoleWriter();
         var runner = new StepRunner(registry, console);

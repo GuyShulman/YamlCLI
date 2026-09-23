@@ -1,0 +1,42 @@
+steps:
+  - action: log
+    message: "=== HTTP Example Workflow ==="
+
+  - action: set-var
+    name: baseUrl
+    value: "https://jsonplaceholder.typicode.com"
+
+  - action: log
+    message: "Base URL: ${baseUrl}"
+
+  # GET request with response capture
+  - action: http
+    method: GET
+    url: "${baseUrl}/posts/1"
+    save-status: getStatus
+    save-body: getBody
+
+  - action: log
+    message: "GET status: ${getStatus}"
+
+  - action: assert
+    condition: "getStatus == 200"
+
+  - action: print-var
+    name: getBody
+
+  # POST request with body
+  - action: http
+    method: POST
+    url: "${baseUrl}/posts"
+    body: '{"title": "foo", "body": "bar", "userId": 1}'
+    save-status: postStatus
+
+  - action: log
+    message: "POST status: ${postStatus}"
+
+  - action: assert
+    condition: "postStatus == 201"
+
+  - action: log
+    message: "=== HTTP Example Complete ==="
