@@ -191,6 +191,37 @@ public class ActionTests
     }
 
     [Fact]
+    public async Task ExecutionContext_ExecuteStepsAsync_ExecutesAllSteps()
+    {
+        var steps = new List<StepDefinition>
+        {
+            CreateStep("set-var", ("name", "k1"), ("value", "v1")),
+            CreateStep("set-var", ("name", "k2"), ("value", "v2"))
+        };
+
+        await _context.ExecuteStepsAsync(steps);
+
+        Assert.Equal("v1", _context.GetVariable("k1"));
+        Assert.Equal("v2", _context.GetVariable("k2"));
+    }
+
+    [Fact]
+    public void StepDefinition_GetOptionalInt_ReturnsDefaultWhenMissing()
+    {
+        var step = new StepDefinition { Action = "test" };
+        Assert.Equal(42, step.GetOptionalInt("missing", 42));
+    }
+
+    [Fact]
+    public void StepDefinition_GetRequiredInt_ThrowsWhenNotAnInt()
+    {
+        var step = new StepDefinition { Action = "test" };
+        step.Properties["count"] = "not-a-number";
+
+        Assert.Throws<StepExecutionException>(() => step.GetRequiredInt("count"));
+    }
+
+    [Fact]
     public void ActionRegistry_UnknownAction_ThrowsException()
     {
         var registry = new ActionRegistry();
@@ -198,7 +229,97 @@ public class ActionTests
         Assert.Throws<StepExecutionException>(() => registry.GetAction("unknown-action"));
     }
 
-    // --- Helper methods ---
+    [Fact]
+    public async Task HttpAction_GetRequest_SavesStatusAndBody()
+    {
+        var mockHandler = new MockHttpMessageHandler(new HttpResponseMessage
+        {
+            StatusCode = System.Net.HttpStatusCode.OK,
+            Content = new StringContent("{\"message\":\"success\"}")
+        });
+        var client = new HttpClient(mockHandler);
+        var action = new HttpAction(client);
+
+        var step = CreateStep("http",
+            ("method", "GET"),
+            ("url", "https://api.example.com/test"),
+            ("save-status", "resStatus"),
+            ("save-body", "resBody"));
+
+        await CaptureConsoleOutput(() => action.ExecuteAsync(step, _context));
+
+        Assert.Equal(200, _context.GetVariable("resStatus"));
+        Assert.Equal("{\"message\":\"success\"}", _context.GetVariable("resBody"));
+    }
+
+    [Fact]
+    public async Task HttpAction_PostRequest_SendsBodyAndSavesResponse()
+    {
+        var mockHandler = new MockHttpMessageHandler(new HttpResponseMessage
+        {
+            StatusCode = System.Net.HttpStatusCode.Created,
+            Content = new StringContent("{\"id\":123}")
+        });
+        var client = new HttpClient(mockHandler);
+        var action = new HttpAction(client);
+
+        _context.SetVariable("userId", 42);
+        var step = CreateStep("http",
+            ("method", "POST"),
+            ("url", "https://api.example.com/items"),
+            ("body", "{\"userId\":${userId}}"),
+            ("save-status", "createdStatus"));
+
+        _context.IsVerbose = true;
+        await CaptureConsoleOutput(() => action.ExecuteAsync(step, _context));
+        _context.IsVerbose = false;
+
+        Assert.Equal(201, _context.GetVariable("createdStatus"));
+    }
+
+    [Fact]
+    public async Task HttpAction_UnsupportedMethod_ThrowsException()
+    {
+        var action = new HttpAction();
+        var step = CreateStep("http",
+            ("method", "DELETE"),
+            ("url", "https://api.example.com/test"));
+
+        await Assert.ThrowsAsync<StepExecutionException>(
+            () => action.ExecuteAsync(step, _context));
+    }
+
+    [Fact]
+    public async Task HttpAction_NetworkFailure_ThrowsStepExecutionException()
+    {
+        var mockHandler = new MockHttpMessageHandler(new HttpRequestException("Connection refused"));
+        var client = new HttpClient(mockHandler);
+        var action = new HttpAction(client);
+
+        var step = CreateStep("http",
+            ("method", "GET"),
+            ("url", "https://invalid.example.com"));
+
+        await Assert.ThrowsAsync<StepExecutionException>(
+            () => action.ExecuteAsync(step, _context));
+    }
+
+    // --- Helper classes & methods ---
+
+    private class MockHttpMessageHandler : HttpMessageHandler
+    {
+        private readonly HttpResponseMessage? _response;
+        private readonly Exception? _exception;
+
+        public MockHttpMessageHandler(HttpResponseMessage response) => _response = response;
+        public MockHttpMessageHandler(Exception exception) => _exception = exception;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (_exception != null) throw _exception;
+            return Task.FromResult(_response ?? new HttpResponseMessage(System.Net.HttpStatusCode.OK));
+        }
+    }
 
     private static StepDefinition CreateStep(string action, params (string key, object value)[] properties)
     {

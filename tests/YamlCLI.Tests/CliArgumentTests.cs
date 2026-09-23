@@ -161,4 +161,104 @@ public class CliArgumentTests
             Console.SetOut(originalOut);
         }
     }
+
+    [Fact]
+    public async Task Main_ValidWorkflow_ReturnsZero()
+    {
+        var tempFile = Path.Combine(Path.GetTempPath(), $"main_test_{Guid.NewGuid():N}.yaml");
+        File.WriteAllText(tempFile, "steps:\n  - action: log\n    message: 'Hello from test'");
+
+        var originalOut = Console.Out;
+        Console.SetOut(new StringWriter());
+        try
+        {
+            var exitCode = await Program.Main(new[] { "--file", tempFile });
+            Assert.Equal(0, exitCode);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+        }
+    }
+
+    [Fact]
+    public async Task Main_DryRunAndVerbose_ReturnsZero()
+    {
+        var tempFile = Path.Combine(Path.GetTempPath(), $"main_dry_{Guid.NewGuid():N}.yaml");
+        File.WriteAllText(tempFile, "steps:\n  - action: log\n    message: 'Dry run'");
+
+        var originalOut = Console.Out;
+        Console.SetOut(new StringWriter());
+        try
+        {
+            var exitCode = await Program.Main(new[] { "--file", tempFile, "--dry-run", "--verbose" });
+            Assert.Equal(0, exitCode);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+        }
+    }
+
+    [Fact]
+    public async Task Main_FailingWorkflow_ReturnsOne()
+    {
+        var tempFile = Path.Combine(Path.GetTempPath(), $"main_fail_{Guid.NewGuid():N}.yaml");
+        File.WriteAllText(tempFile, "steps:\n  - action: assert\n    condition: '1 == 2'");
+
+        var originalOut = Console.Out;
+        Console.SetOut(new StringWriter());
+        try
+        {
+            var exitCode = await Program.Main(new[] { "--file", tempFile });
+            Assert.Equal(1, exitCode);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+        }
+    }
+
+    [Fact]
+    public async Task Main_EmptySteps_ReturnsZero()
+    {
+        var tempFile = Path.Combine(Path.GetTempPath(), $"main_empty_{Guid.NewGuid():N}.yaml");
+        File.WriteAllText(tempFile, "steps: []");
+
+        var originalOut = Console.Out;
+        Console.SetOut(new StringWriter());
+        try
+        {
+            var exitCode = await Program.Main(new[] { "--file", tempFile });
+            Assert.Equal(0, exitCode);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+        }
+    }
+
+    [Fact]
+    public async Task Main_InvalidYamlSyntax_ReturnsOne()
+    {
+        var tempFile = Path.Combine(Path.GetTempPath(), $"main_invalid_{Guid.NewGuid():N}.yaml");
+        File.WriteAllText(tempFile, "not_valid_yaml: :::");
+
+        var originalOut = Console.Out;
+        Console.SetOut(new StringWriter());
+        try
+        {
+            var exitCode = await Program.Main(new[] { "--file", tempFile, "--verbose" });
+            Assert.Equal(1, exitCode);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+        }
+    }
 }

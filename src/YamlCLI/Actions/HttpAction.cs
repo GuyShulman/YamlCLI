@@ -24,6 +24,16 @@ public class HttpAction : IStepAction
     public string ActionType => "http";
 
     private static readonly HttpClient SharedClient = new();
+    private readonly HttpClient _client;
+
+    public HttpAction() : this(null)
+    {
+    }
+
+    public HttpAction(HttpClient? client)
+    {
+        _client = client ?? SharedClient;
+    }
 
     public async Task ExecuteAsync(StepDefinition step, ExecutionContext context)
     {
@@ -41,8 +51,8 @@ public class HttpAction : IStepAction
         {
             response = method switch
             {
-                "GET" => await SharedClient.GetAsync(url),
-                "POST" => await SharedClient.PostAsync(url,
+                "GET" => await _client.GetAsync(url),
+                "POST" => await _client.PostAsync(url,
                     body != null
                         ? new StringContent(context.Interpolate(body), System.Text.Encoding.UTF8, "application/json")
                         : null),

@@ -275,16 +275,22 @@ The test suite covers all components across 5 test classes:
 | Test File | Tests | Coverage |
 |---|---|---|
 | `YamlParserTests.cs` | 11 | YAML parsing: valid steps, all action types, nested steps, edge cases |
-| `ActionTests.cs` | 16 | Core actions: output, timing, HTTP, pass/fail, variables |
+| `ActionTests.cs` | 23 | Core actions: output, timing, HTTP GET/POST, pass/fail, variables |
 | `BonusActionTests.cs` | 23 | All 5 bonus actions: parallel, retry, shell, condition, import, registry |
-| `StepRunnerTests.cs` | 7 | Execution order, dry-run, verbose, fail-fast, summary |
-| `CliArgumentTests.cs` | 12 | Argument parsing, flags, help, exit codes |
-| **Total** | **69** | **100% Passing** |
+| `StepRunnerTests.cs` | 8 | Execution order, dry-run, verbose, fail-fast, skipped count summary |
+| `CliArgumentTests.cs` | 17 | CLI argument parsing, flags, help, exit codes, Program.Main execution |
+| **Total** | **82** | **100% Passing (85.7% Line Coverage)** |
 
 Run all tests:
 
 ```bash
 dotnet test
+```
+
+Run with code coverage collection:
+
+```bash
+dotnet test --collect:"XPlat Code Coverage"
 ```
 
 Run with detailed output:
