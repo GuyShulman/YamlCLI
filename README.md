@@ -1,12 +1,49 @@
 # YAML-Based Action Runner CLI
 
-A C# .NET 10 CLI tool that takes a YAML file describing a sequence of steps and runs them in order.
+A robust, extensible C# .NET 10 CLI tool that parses YAML workflow files and executes steps sequentially or concurrently, featuring variable interpolation, dynamic expression evaluation, resilient error handling, and modular sub-workflow composition.
+
+---
+
+## Table of Contents
+
+- [Quick Start](#quick-start)
+  - [Prerequisites](#prerequisites)
+  - [Build](#build)
+  - [Run](#run)
+- [CLI Options](#cli-options)
+  - [Exit Codes](#exit-codes)
+- [YAML Workflow Format](#yaml-workflow-format)
+  - [Variable Interpolation](#variable-interpolation)
+- [Supported Actions](#supported-actions)
+  - [Core Actions](#core-actions)
+    - [1. `log`](#1-log--log-a-message)
+    - [2. `delay`](#2-delay--wait-duration)
+    - [3. `assert`](#3-assert--evaluate-condition)
+    - [4. `http`](#4-http--http-request)
+    - [5. `set-var`](#5-set-var--set-variable)
+    - [6. `print-var`](#6-print-var--print-variable)
+  - [Bonus Actions](#bonus-actions)
+    - [7. `parallel`](#7-parallel--concurrent-execution)
+    - [8. `retry`](#8-retry--resilient-retries)
+    - [9. `shell`](#9-shell--execute-system-commands)
+    - [10. `condition`](#10-condition--conditional-branching)
+    - [11. `import`](#11-import--modular-workflow-reuse)
+- [Example Workflows](#example-workflows)
+- [Testing & Code Coverage](#testing--code-coverage)
+  - [Running Tests](#running-tests)
+  - [Viewing Code Coverage in Terminal](#viewing-code-coverage-in-terminal)
+  - [Coverage Breakdown](#coverage-breakdown)
+- [Design & Architecture Notes](#design--architecture-notes)
+  - [Extensibility (Adding New Actions)](#extensibility-adding-new-actions)
+  - [Fail-Fast Execution Flow](#fail-fast-execution-flow)
+
+---
 
 ## Quick Start
 
 ### Prerequisites
 
-- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
+- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) (v10.0 or higher)
 
 ### Build
 
@@ -17,176 +54,193 @@ dotnet build
 ### Run
 
 ```bash
-# Run a YAML workflow
+# Run a basic workflow
 dotnet run --project src/YamlCLI -- --file examples/basic.yaml
 
-# Run with verbose output
+# Run with verbose output (shows timing and internal details)
 dotnet run --project src/YamlCLI -- --file examples/basic.yaml --verbose
 
-# Dry-run mode (prints steps without executing)
+# Dry-run mode (parses and validates steps without execution)
 dotnet run --project src/YamlCLI -- --file examples/basic.yaml --dry-run
 
-# Show help
+# Show help menu
 dotnet run --project src/YamlCLI -- --help
-```
-
-### Run Tests
-
-```bash
-dotnet test
 ```
 
 ---
 
 ## CLI Options
 
-| Option | Description |
-|---|---|
-| `--file <path>`, `-f <path>` | **(Required)** Path to the YAML workflow file |
-| `--dry-run` | Prints parsed steps without executing them |
-| `--verbose`, `-v` | Enables verbose output with step execution details |
-| `--help`, `-h` | Shows CLI usage and options |
+| Option | Shorthand | Description |
+|---|---|---|
+| `--file <path>` | `-f <path>` | **(Required)** Path to the YAML workflow file |
+| `--dry-run` | | Validates and displays parsed steps without executing them |
+| `--verbose` | `-v` | Enables detailed step execution logs and millisecond timers |
+| `--help` | `-h` | Displays CLI usage instructions and available actions |
 
 ### Exit Codes
 
-| Code | Meaning |
+| Exit Code | Meaning |
 |---|---|
-| `0` | All steps completed successfully |
-| `1` | One or more steps failed or an error occurred |
+| `0` | All executed steps succeeded |
+| `1` | One or more steps failed, an assertion failed, or a file/parsing error occurred |
 
 ---
 
-## YAML Format
+## YAML Workflow Format
 
-Every YAML workflow file has a top-level `steps` key containing a list of actions:
+Every workflow file contains a top-level `steps` list:
 
 ```yaml
 steps:
-  - action: <action-type>
+  - action: <action-name>
     <property>: <value>
-    ...
 ```
 
 ### Variable Interpolation
 
-Variables set with `set-var` can be referenced in strings using `${varName}` syntax:
+Variables stored in the execution context can be referenced inside strings using `${varName}`:
 
 ```yaml
 steps:
   - action: set-var
-    name: host
-    value: "example.com"
+    name: greeting
+    value: "Hello, World!"
+
   - action: log
-    message: "Connecting to ${host}..."
+    message: "Message is: ${greeting}"
 ```
+
+Variables are case-insensitive and thread-safe.
 
 ---
 
-## Core Actions
+## Supported Actions
 
-### `log` — Log a message
+### Core Actions
+
+#### 1. `log` — Log a message
+
+Prints a message to the console with variable interpolation.
 
 ```yaml
 - action: log
-  message: "Hello, world!"
+  message: "Current endpoint: ${baseUrl}"
 ```
 
-| Property | Required | Description |
-|---|---|---|
-| `message` | ✓ | Message to log. Supports `${var}` interpolation. |
+| Property | Required | Type | Description |
+|---|---|---|---|
+| `message` | ✓ | `string` | Text to display. Supports `${var}` interpolation. |
 
-### `delay` — Wait for a duration
+#### 2. `delay` — Wait duration
+
+Asynchronously pauses execution without blocking threads.
 
 ```yaml
 - action: delay
-  duration: 1000
+  duration: 500
 ```
 
-| Property | Required | Description |
-|---|---|---|
-| `duration` | ✓ | Time to wait in milliseconds. |
+| Property | Required | Type | Description |
+|---|---|---|---|
+| `duration` | ✓ | `integer` | Wait duration in milliseconds. Must be $\ge 0$. |
 
-### `assert` — Evaluate a condition
+#### 3. `assert` — Evaluate condition
+
+Evaluates an arithmetic, comparison, or boolean expression. Execution stops if the assertion evaluates to `false`.
 
 ```yaml
 - action: assert
   condition: "1 + 2 == 3"
+
+- action: assert
+  condition: "${statusCode} == 200"
 ```
 
-| Property | Required | Description |
-|---|---|---|
-| `condition` | ✓ | Expression to evaluate. Supports arithmetic (`+`, `-`, `*`, `/`), comparisons (`==`, `!=`, `>`, `<`, `>=`, `<=`), and variable references. |
+| Property | Required | Type | Description |
+|---|---|---|---|
+| `condition` | ✓ | `string` | Expression to evaluate using Dynamic LINQ (e.g. `==`, `!=`, `<`, `>`, `<=`, `>=`, `&&`, `\|\|`). |
 
-If the condition evaluates to `false`, execution stops immediately with a non-zero exit code.
+#### 4. `http` — HTTP request
 
-### `http` — Make an HTTP request
+Sends an HTTP `GET` or `POST` request with JSON support and variable capturing.
 
 ```yaml
 - action: http
   method: GET
-  url: "https://api.example.com/data"
-  save-status: statusCode
-  save-body: responseBody
+  url: "https://jsonplaceholder.typicode.com/posts/1"
+  save-status: postStatus
+  save-body: postBody
+
+- action: http
+  method: POST
+  url: "https://jsonplaceholder.typicode.com/posts"
+  body: '{"title": "foo", "body": "bar", "userId": 1}'
+  save-status: createStatus
 ```
 
-| Property | Required | Description |
-|---|---|---|
-| `method` | ✓ | HTTP method: `GET` or `POST` |
-| `url` | ✓ | URL to request. Supports `${var}` interpolation. |
-| `body` | | Request body (for POST). Supports `${var}` interpolation. |
-| `save-status` | | Variable name to store the response status code (integer). |
-| `save-body` | | Variable name to store the response body (string). |
+| Property | Required | Type | Description |
+|---|---|---|---|
+| `method` | ✓ | `string` | HTTP method: `GET` or `POST`. |
+| `url` | ✓ | `string` | Target endpoint. Supports `${var}` interpolation. |
+| `body` | Optional | `string` | JSON payload for `POST` requests. |
+| `save-status` | Optional | `string` | Context variable to save the integer HTTP status code. |
+| `save-body` | Optional | `string` | Context variable to save the response body string. |
 
-### `set-var` — Set a variable
+#### 5. `set-var` — Set variable
+
+Stores a variable in memory for subsequent steps.
 
 ```yaml
 - action: set-var
-  name: baseUrl
+  name: apiUrl
   value: "https://api.example.com"
 ```
 
-| Property | Required | Description |
-|---|---|---|
-| `name` | ✓ | Variable name. |
-| `value` | ✓ | Value to store. Supports `${var}` interpolation. |
+| Property | Required | Type | Description |
+|---|---|---|---|
+| `name` | ✓ | `string` | Variable name. |
+| `value` | ✓ | `any` | Value to store. Supports `${var}` interpolation. |
 
-### `print-var` — Print a variable
+#### 6. `print-var` — Print variable
+
+Outputs the current value of a variable stored in context.
 
 ```yaml
 - action: print-var
-  name: baseUrl
+  name: apiUrl
 ```
 
-| Property | Required | Description |
-|---|---|---|
-| `name` | ✓ | Variable name to print. Throws an error if not defined. |
+| Property | Required | Type | Description |
+|---|---|---|---|
+| `name` | ✓ | `string` | Name of the variable to display. Throws if not defined. |
 
 ---
 
-## Bonus Actions
+### Bonus Actions
 
-### `parallel` — Run steps in parallel
+#### 7. `parallel` — Concurrent execution
 
-Executes a list of steps concurrently using `Task.WhenAll`. Shared variables are thread-safe (`ConcurrentDictionary`).
+Runs multiple child steps in parallel using `Task.WhenAll`. Shared variables are backed by a thread-safe `ConcurrentDictionary`.
 
 ```yaml
 - action: parallel
   steps:
     - action: log
-      message: "Worker 1 running"
+      message: "Worker A starting"
     - action: log
-      message: "Worker 2 running"
+      message: "Worker B starting"
     - action: delay
-      duration: 100
+      duration: 200
 ```
 
-| Property | Required | Description |
-|---|---|---|
-| `steps` | ✓ | List of step definitions to execute in parallel |
+| Property | Required | Type | Description |
+|---|---|---|---|
+| `steps` | ✓ | `list` | List of step definitions to execute concurrently. |
 
-### `retry` — Retry on failure
+#### 8. `retry` — Resilient retries
 
-Retries a step or a list of steps up to N times before failing, with optional backoff delay.
+Retries a step or a list of steps up to $N$ times upon failure with optional delay.
 
 ```yaml
 - action: retry
@@ -194,36 +248,38 @@ Retries a step or a list of steps up to N times before failing, with optional ba
   delay: 500
   step:
     action: http
-    url: "https://api.example.com/data"
+    method: GET
+    url: "https://api.example.com/health"
 ```
 
-| Property | Required | Description |
-|---|---|---|
-| `attempts` / `count` / `times` | Optional | Max attempts (default: `3`) |
-| `delay` / `delay-ms` | Optional | Delay between retries in milliseconds (default: `0`) |
-| `step` / `steps` | ✓ | Single step or list of steps to execute with retry |
+| Property | Required | Type | Description |
+|---|---|---|---|
+| `attempts` / `count` / `times` | Optional | `integer` | Max attempts (default: `3`). |
+| `delay` / `delay-ms` | Optional | `integer` | Wait duration in milliseconds between retries (default: `0`). |
+| `step` / `steps` | ✓ | `step` or `list` | Step(s) to execute with retry protection. |
 
-### `shell` — Execute shell commands
+#### 9. `shell` — Execute system commands
 
-Executes a command using the system shell (`cmd.exe` on Windows, `/bin/sh` on Unix) and streams standard output and error.
+Executes a command using the system shell (`cmd.exe` on Windows, `/bin/sh` on Unix) and captures standard output and exit codes.
 
 ```yaml
 - action: shell
   command: "git rev-parse --short HEAD"
   capture-var: gitHash
+  capture-exit-code: gitExit
 ```
 
-| Property | Required | Description |
-|---|---|---|
-| `command` | ✓ | Shell command to execute. Supports `${var}` interpolation. |
-| `capture-var` | Optional | Context variable name to store standard output |
-| `capture-exit-code` | Optional | Context variable name to store process exit code |
-| `working-dir` / `cwd` | Optional | Working directory for the process |
-| `ignore-error` | Optional | If `true`, does not fail if exit code is non-zero (default: `false`) |
+| Property | Required | Type | Description |
+|---|---|---|---|
+| `command` | ✓ | `string` | Shell command to execute. Supports `${var}` interpolation. |
+| `capture-var` | Optional | `string` | Variable name to store standard output. |
+| `capture-exit-code` | Optional | `string` | Variable name to store exit code. |
+| `working-dir` / `cwd` | Optional | `string` | Working directory for command execution. |
+| `ignore-error` | Optional | `boolean` | If `true`, does not fail if exit code is non-zero (default: `false`). |
 
-### `condition` — Conditional branching
+#### 10. `condition` — Conditional branching
 
-Evaluates a boolean condition expression and executes the `then` branch if true, or optional `else` branch if false.
+Evaluates expressions and runs the `then` branch if true, or the optional `else` branch if false.
 
 ```yaml
 - action: condition
@@ -233,98 +289,170 @@ Evaluates a boolean condition expression and executes the `then` branch if true,
       message: "Request succeeded!"
   else:
     - action: log
-      message: "Request failed!"
+      message: "Request failed with code ${statusCode}"
 ```
 
-| Property | Required | Description |
-|---|---|---|
-| `if` / `condition` | ✓ | Expression to evaluate. Supports `${var}`, bare variables, and operators. |
-| `then` / `steps` | ✓ | Steps to execute when condition is true |
-| `else` | Optional | Steps to execute when condition is false |
+| Property | Required | Type | Description |
+|---|---|---|---|
+| `if` / `condition` | ✓ | `string` | Expression to evaluate. |
+| `then` / `steps` | ✓ | `step` or `list` | Step(s) to execute if condition is true. |
+| `else` | Optional | `step` or `list` | Step(s) to execute if condition is false. |
 
-### `import` — Import and run another YAML workflow
+#### 11. `import` — Modular workflow reuse
 
-Imports another YAML workflow file into the current execution context. Imported steps share variables with the parent workflow. Relative file paths resolve relative to the importing file's directory.
+Imports and executes steps from an external YAML workflow file within the current context. Relative paths resolve against the importing YAML file's directory.
 
 ```yaml
 - action: import
-  file: "shared/auth-steps.yaml"
+  file: "sub-workflow.yaml"
 ```
 
-| Property | Required | Description |
-|---|---|---|
-| `file` / `path` | ✓ | Path to YAML file. Supports `${var}` interpolation. |
+| Property | Required | Type | Description |
+|---|---|---|---|
+| `file` / `path` | ✓ | `string` | Path to target YAML workflow file. |
 
 ---
 
 ## Example Workflows
 
-The `examples/` directory contains sample workflows:
+The `examples/` directory contains sample workflows ready to run:
 
-- **[`basic.yaml`](examples/basic.yaml)** — Basic workflow showing log, delay, variables, and assertions.
-- **[`http-example.yaml`](examples/http-example.yaml)** — HTTP workflow with GET, POST, response capture, and status assertion.
-- **[`bonus-actions.yaml`](examples/bonus-actions.yaml)** — Complete showcase of all 5 bonus actions (shell, condition, parallel, retry, import).
-- **[`sub-workflow.yaml`](examples/sub-workflow.yaml)** — Modular sub-workflow imported by `bonus-actions.yaml`.
+| Workflow File | Description | Command |
+|---|---|---|
+| **[`basic.yaml`](examples/basic.yaml)** | Core workflow demonstration (variables, delays, assertions) | `dotnet run --project src/YamlCLI -- --file examples/basic.yaml` |
+| **[`http-example.yaml`](examples/http-example.yaml)** | HTTP GET/POST calls, JSON payload, and status assertions | `dotnet run --project src/YamlCLI -- --file examples/http-example.yaml` |
+| **[`bonus-actions.yaml`](examples/bonus-actions.yaml)** | Complete showcase of all 5 bonus actions in action | `dotnet run --project src/YamlCLI -- --file examples/bonus-actions.yaml` |
+| **[`sub-workflow.yaml`](examples/sub-workflow.yaml)** | Modular sub-workflow imported by `bonus-actions.yaml` | (Imported automatically) |
 
 ---
 
-## Tests
+## Testing & Code Coverage
 
-The test suite covers all components across 5 test classes:
+The solution contains **82 automated tests** across 5 test classes with **100% pass rate**:
 
-| Test File | Tests | Coverage |
+| Test Class | Tests | Focus Area |
 |---|---|---|
-| `YamlParserTests.cs` | 11 | YAML parsing: valid steps, all action types, nested steps, edge cases |
-| `ActionTests.cs` | 23 | Core actions: output, timing, HTTP GET/POST, pass/fail, variables |
-| `BonusActionTests.cs` | 23 | All 5 bonus actions: parallel, retry, shell, condition, import, registry |
-| `StepRunnerTests.cs` | 8 | Execution order, dry-run, verbose, fail-fast, skipped count summary |
-| `CliArgumentTests.cs` | 17 | CLI argument parsing, flags, help, exit codes, Program.Main execution |
-| **Total** | **82** | **100% Passing (85.7% Line Coverage)** |
+| [`YamlParserTests.cs`](tests/YamlCLI.Tests/YamlParserTests.cs) | 11 | Valid/invalid YAML structures, nested steps, missing keys |
+| [`ActionTests.cs`](tests/YamlCLI.Tests/ActionTests.cs) | 23 | Core actions in isolation (`log`, `delay`, `assert`, `http` GET/POST, `set-var`, `print-var`) |
+| [`BonusActionTests.cs`](tests/YamlCLI.Tests/BonusActionTests.cs) | 23 | Bonus actions (`parallel`, `retry`, `shell`, `condition`, `import`, registry discovery) |
+| [`StepRunnerTests.cs`](tests/YamlCLI.Tests/StepRunnerTests.cs) | 8 | Sequential execution, fail-fast on error, dry-run, verbose output, summary reporting |
+| [`CliArgumentTests.cs`](tests/YamlCLI.Tests/CliArgumentTests.cs) | 17 | CLI argument parsing, flags, help menu, exit codes, `Program.Main` execution |
+| **Total** | **82** | **100% Passing** |
 
-Run all tests:
+### Running Tests
 
 ```bash
+# Standard test run
 dotnet test
+
+# Detailed test output
+dotnet test --verbosity normal
 ```
 
-Run with code coverage collection:
+### Viewing Code Coverage in Terminal
+
+You can inspect code coverage directly in your terminal using either of the following methods:
+
+#### Option A: Formatted & Colorized Component Report (Recommended)
+
+Run the included coverage script:
+
+```powershell
+# Windows (PowerShell)
+powershell -ExecutionPolicy Bypass -File scripts/coverage.ps1
+
+# Linux / macOS (Bash)
+./scripts/coverage.sh
+```
+
+**Terminal Output Preview:**
+```text
+===========================================================================
+Class / Component                   |  Total Lines |    Covered |   Coverage %
+---------------------------------------------------------------------------
+Actions.ActionRegistry              |           34 |         31 |        91.2%
+Actions.AssertAction                |           21 |         18 |        85.7%
+Actions.ConditionAction             |           41 |         28 |        68.3%
+Actions.DelayAction                 |            8 |          8 |       100.0%
+Actions.HttpAction                  |           51 |         51 |       100.0%
+Actions.ImportAction                |           32 |         29 |        90.6%
+Actions.LogAction                   |            7 |          7 |       100.0%
+Actions.ParallelAction              |           36 |         32 |        88.9%
+Actions.PrintVarAction              |            7 |          7 |       100.0%
+Actions.RetryAction                 |           61 |         44 |        72.1%
+Actions.SetVarAction                |            9 |          9 |       100.0%
+Actions.ShellAction                 |           77 |         61 |        79.2%
+CliArguments                        |            4 |          4 |       100.0%
+Execution.ConditionEvaluator        |           36 |         30 |        83.3%
+Execution.ConsoleWriter             |           59 |         59 |       100.0%
+Execution.StepRunner                |           70 |         61 |        87.1%
+Models.ExecutionContext             |           48 |         44 |        91.7%
+Models.StepDefinition               |           46 |         33 |        71.7%
+Models.StepExecutionException       |            2 |          2 |       100.0%
+Parsing.YamlParser                  |           70 |         48 |        68.6%
+Program                             |          108 |        104 |        96.3%
+===========================================================================
+OVERALL LINE COVERAGE   : 85.8% (710/827 lines)
+OVERALL BRANCH COVERAGE : 73.1%
+===========================================================================
+```
+
+#### Option B: Built-in Coverlet MSBuild Output
+
+```powershell
+dotnet test -p:CollectCoverage=true
+```
+
+#### Option C: Generate Standard Cobertura XML (for CI/CD pipelines)
 
 ```bash
 dotnet test --collect:"XPlat Code Coverage"
 ```
-
-Run with detailed output:
-
-```bash
-dotnet test --verbosity normal
-```
+Generated reports are placed under `tests/YamlCLI.Tests/TestResults/`.
 
 ---
 
-## Design Notes
+## Design & Architecture Notes
 
-### Architecture
+### Strategy Pattern & Reflection Discovery
 
-The tool follows the **Strategy Pattern** and **Open-Closed Principle**:
+- **`IStepAction`**: Unified interface implemented by all actions (`ActionType` identifier + `ExecuteAsync` method).
+- **`ActionRegistry`**: Scans the executing assembly via reflection at startup. New actions require zero registration boilerplate.
+- **`ExecutionContext`**: Thread-safe runtime state using `ConcurrentDictionary<string, object>`.
+- **`ConditionEvaluator`**: Centralized Dynamic LINQ expression evaluator shared by `assert` and `condition`.
 
-- **`IStepAction`** — Interface that every action type implements (`ActionType` + `ExecuteAsync`)
-- **`ActionRegistry`** — Uses reflection to auto-discover all `IStepAction` implementations at startup. Adding a new action is simply creating a class that implements `IStepAction` — zero registration code needed.
-- **`StepRunner`** — Iterates through parsed steps, resolves each action from the registry, and executes them with error handling, timing, and formatted output.
-- **`ExecutionContext`** — Shared runtime state with thread-safe `ConcurrentDictionary` variables, flags (`IsDryRun`, `IsVerbose`), and step executor helpers.
-- **`ConditionEvaluator`** — Unified expression evaluator powered by Dynamic LINQ for both `assert` and `condition` actions.
+### Extensibility (Adding New Actions)
 
-### Extensibility
+To add a custom action:
 
-To add a new action:
+1. Create a class implementing `IStepAction` in `src/YamlCLI/Actions/`:
+   ```csharp
+   public class MyCustomAction : IStepAction
+   {
+       public string ActionType => "my-custom";
 
-1. Create a new class implementing `IStepAction` in `Actions/`
-2. Set `ActionType` to the YAML action name (e.g. `"my-action"`)
-3. Implement `ExecuteAsync(StepDefinition step, ExecutionContext context)`
+       public async Task ExecuteAsync(StepDefinition step, ExecutionContext context)
+       {
+           var message = step.GetRequiredString("message");
+           context.Console.Message($"Custom: {message}");
+       }
+   }
+   ```
+2. Build the project. The action is immediately available in YAML files:
+   ```yaml
+   steps:
+     - action: my-custom
+       message: "Works out of the box!"
+   ```
 
-The `ActionRegistry` will automatically discover and register it via reflection.
+### Fail-Fast Execution Flow
 
-### Error Handling
+If any step throws an error or assertion failure, execution stops immediately. The runner reports the exact count of succeeded, failed, and skipped steps:
 
-- **Fail-fast**: Execution stops on the first error with a clear message and summary
-- **Exit codes**: Returns 0 on success, 1 on any failure
-- **Colorized output**: Clear visual indicators for steps, dry-run, successes, and failures
+```text
+───────────────────────────────────
+  Result: FAILED
+  Steps: 5/6 succeeded, 1 failed (1 skipped)
+  Duration: 2156ms
+───────────────────────────────────
+```
