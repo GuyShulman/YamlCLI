@@ -1,0 +1,11 @@
+# Sub-workflow imported by another workflow
+steps:
+  - action: log
+    message: "--- Sub-workflow started ---"
+
+  - action: set-var
+    name: importedFlag
+    value: "active"
+
+  - action: log
+    message: "Imported sub-workflow executed successfully! importedFlag=${importedFlag}"

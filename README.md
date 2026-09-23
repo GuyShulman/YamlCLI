@@ -163,17 +163,123 @@ If the condition evaluates to `false`, execution stops immediately with a non-ze
 
 ---
 
+## Bonus Actions
+
+### `parallel` — Run steps in parallel
+
+Executes a list of steps concurrently using `Task.WhenAll`. Shared variables are thread-safe (`ConcurrentDictionary`).
+
+```yaml
+- action: parallel
+  steps:
+    - action: log
+      message: "Worker 1 running"
+    - action: log
+      message: "Worker 2 running"
+    - action: delay
+      duration: 100
+```
+
+| Property | Required | Description |
+|---|---|---|
+| `steps` | ✓ | List of step definitions to execute in parallel |
+
+### `retry` — Retry on failure
+
+Retries a step or a list of steps up to N times before failing, with optional backoff delay.
+
+```yaml
+- action: retry
+  attempts: 3
+  delay: 500
+  step:
+    action: http
+    url: "https://api.example.com/data"
+```
+
+| Property | Required | Description |
+|---|---|---|
+| `attempts` / `count` / `times` | Optional | Max attempts (default: `3`) |
+| `delay` / `delay-ms` | Optional | Delay between retries in milliseconds (default: `0`) |
+| `step` / `steps` | ✓ | Single step or list of steps to execute with retry |
+
+### `shell` — Execute shell commands
+
+Executes a command using the system shell (`cmd.exe` on Windows, `/bin/sh` on Unix) and streams standard output and error.
+
+```yaml
+- action: shell
+  command: "git rev-parse --short HEAD"
+  capture-var: gitHash
+```
+
+| Property | Required | Description |
+|---|---|---|
+| `command` | ✓ | Shell command to execute. Supports `${var}` interpolation. |
+| `capture-var` | Optional | Context variable name to store standard output |
+| `capture-exit-code` | Optional | Context variable name to store process exit code |
+| `working-dir` / `cwd` | Optional | Working directory for the process |
+| `ignore-error` | Optional | If `true`, does not fail if exit code is non-zero (default: `false`) |
+
+### `condition` — Conditional branching
+
+Evaluates a boolean condition expression and executes the `then` branch if true, or optional `else` branch if false.
+
+```yaml
+- action: condition
+  if: "${statusCode} == 200"
+  then:
+    - action: log
+      message: "Request succeeded!"
+  else:
+    - action: log
+      message: "Request failed!"
+```
+
+| Property | Required | Description |
+|---|---|---|
+| `if` / `condition` | ✓ | Expression to evaluate. Supports `${var}`, bare variables, and operators. |
+| `then` / `steps` | ✓ | Steps to execute when condition is true |
+| `else` | Optional | Steps to execute when condition is false |
+
+### `import` — Import and run another YAML workflow
+
+Imports another YAML workflow file into the current execution context. Imported steps share variables with the parent workflow. Relative file paths resolve relative to the importing file's directory.
+
+```yaml
+- action: import
+  file: "shared/auth-steps.yaml"
+```
+
+| Property | Required | Description |
+|---|---|---|
+| `file` / `path` | ✓ | Path to YAML file. Supports `${var}` interpolation. |
+
+---
+
+## Example Workflows
+
+The `examples/` directory contains sample workflows:
+
+- **[`basic.yaml`](examples/basic.yaml)** — Basic workflow showing log, delay, variables, and assertions.
+- **[`http-example.yaml`](examples/http-example.yaml)** — HTTP workflow with GET, POST, response capture, and status assertion.
+- **[`bonus-actions.yaml`](examples/bonus-actions.yaml)** — Complete showcase of all 5 bonus actions (shell, condition, parallel, retry, import).
+- **[`sub-workflow.yaml`](examples/sub-workflow.yaml)** — Modular sub-workflow imported by `bonus-actions.yaml`.
+
+---
+
 ## Tests
 
-The test suite covers all components:
+The test suite covers all components across 5 test classes:
 
 | Test File | Tests | Coverage |
 |---|---|---|
-| `YamlParserTests.cs` | 11 | YAML parsing: valid steps, all action types, edge cases |
-| `ActionTests.cs` | 16 | Each core action: output, timing, pass/fail, variables |
+| `YamlParserTests.cs` | 11 | YAML parsing: valid steps, all action types, nested steps, edge cases |
+| `ActionTests.cs` | 16 | Core actions: output, timing, HTTP, pass/fail, variables |
+| `BonusActionTests.cs` | 23 | All 5 bonus actions: parallel, retry, shell, condition, import, registry |
 | `StepRunnerTests.cs` | 7 | Execution order, dry-run, verbose, fail-fast, summary |
-| `CliArgumentTests.cs` | 12 | Argument parsing, help, exit codes |
-| **Total** | **46** | |
+| `CliArgumentTests.cs` | 12 | Argument parsing, flags, help, exit codes |
+| **Total** | **69** | **100% Passing** |
 
 Run all tests:
 
@@ -193,34 +299,26 @@ dotnet test --verbosity normal
 
 ### Architecture
 
-The tool follows the **Strategy Pattern** for action handling:
+The tool follows the **Strategy Pattern** and **Open-Closed Principle**:
 
 - **`IStepAction`** — Interface that every action type implements (`ActionType` + `ExecuteAsync`)
 - **`ActionRegistry`** — Uses reflection to auto-discover all `IStepAction` implementations at startup. Adding a new action is simply creating a class that implements `IStepAction` — zero registration code needed.
-- **`StepRunner`** — Iterates through parsed steps, resolves each action from the registry, and executes them with error handling.
-- **`ExecutionContext`** — Shared runtime state (variables, flags) passed through the execution pipeline.
+- **`StepRunner`** — Iterates through parsed steps, resolves each action from the registry, and executes them with error handling, timing, and formatted output.
+- **`ExecutionContext`** — Shared runtime state with thread-safe `ConcurrentDictionary` variables, flags (`IsDryRun`, `IsVerbose`), and step executor helpers.
+- **`ConditionEvaluator`** — Unified expression evaluator powered by Dynamic LINQ for both `assert` and `condition` actions.
 
 ### Extensibility
 
 To add a new action:
 
-1. Create a new class implementing `IStepAction`
-2. Set `ActionType` to the YAML action name
-3. Implement `ExecuteAsync` with your logic
+1. Create a new class implementing `IStepAction` in `Actions/`
+2. Set `ActionType` to the YAML action name (e.g. `"my-action"`)
+3. Implement `ExecuteAsync(StepDefinition step, ExecutionContext context)`
 
-That's it — the `ActionRegistry` will auto-discover it via reflection.
-
-### Expression Evaluation
-
-The `assert` action uses **System.Linq.Dynamic.Core** to evaluate expressions at runtime, supporting:
-
-- Arithmetic: `1 + 2 * 3`
-- Comparisons: `x > 5`, `status == 200`
-- Boolean: `true`, `false`
-- Variables are substituted before evaluation
+The `ActionRegistry` will automatically discover and register it via reflection.
 
 ### Error Handling
 
-- **Fail-fast**: Execution stops on the first error with a clear message
+- **Fail-fast**: Execution stops on the first error with a clear message and summary
 - **Exit codes**: Returns 0 on success, 1 on any failure
-- **Colorized output**: Green ✓ for success, red ✗ for errors, cyan ⚡ for verbose info
+- **Colorized output**: Clear visual indicators for steps, dry-run, successes, and failures

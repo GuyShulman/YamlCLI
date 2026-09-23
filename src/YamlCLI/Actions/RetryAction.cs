@@ -47,11 +47,7 @@ public class RetryAction : IStepAction
         var steps = step.GetSteps("steps");
         if (steps.Count == 0)
         {
-            var single = step.GetNestedStep("step");
-            if (single != null)
-            {
-                steps.Add(single);
-            }
+            steps = step.GetSteps("step");
         }
 
         if (steps.Count == 0)

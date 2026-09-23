@@ -1,0 +1,67 @@
+# Demonstration of all 5 Bonus Actions:
+# 1. parallel  - concurrent step execution
+# 2. retry     - resilient execution with automatic retries
+# 3. shell     - command execution and output capturing
+# 4. condition - conditional branching (if/then/else)
+# 5. import    - modular workflow reuse
+
+steps:
+  - action: log
+    message: "=== Testing Shell Action ==="
+
+  - action: shell
+    command: "echo Hello from CLI shell"
+    capture-var: shellGreeting
+
+  - action: log
+    message: "Captured shell output: ${shellGreeting}"
+
+  - action: log
+    message: "=== Testing Condition Action ==="
+
+  - action: set-var
+    name: score
+    value: 95
+
+  - action: condition
+    if: "${score} >= 90"
+    then:
+      - action: log
+        message: "Grade: Excellent (${score} >= 90)"
+    else:
+      - action: log
+        message: "Grade: Needs improvement"
+
+  - action: log
+    message: "=== Testing Parallel Action ==="
+
+  - action: parallel
+    steps:
+      - action: log
+        message: "Parallel worker A starting"
+      - action: log
+        message: "Parallel worker B starting"
+      - action: delay
+        duration: 100
+
+  - action: log
+    message: "=== Testing Retry Action ==="
+
+  - action: retry
+    attempts: 3
+    delay: 50
+    step:
+      - action: log
+        message: "Executing step with retry capability"
+
+  - action: log
+    message: "=== Testing Import Action ==="
+
+  - action: import
+    file: "sub-workflow.yaml"
+
+  - action: assert
+    condition: "importedFlag == \"active\""
+
+  - action: log
+    message: "=== All bonus actions completed successfully! ==="
