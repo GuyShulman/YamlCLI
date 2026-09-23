@@ -351,18 +351,10 @@ dotnet test --verbosity normal
 
 ### Viewing Code Coverage in Terminal
 
-You can inspect code coverage directly in your terminal using either of the following methods:
-
-#### Option A: Formatted & Colorized Component Report (Recommended)
-
-Run the included coverage script:
+Run the included coverage script to inspect code coverage with a colorized, per-component breakdown:
 
 ```powershell
-# Windows (PowerShell)
 powershell -ExecutionPolicy Bypass -File scripts/coverage.ps1
-
-# Linux / macOS (Bash)
-./scripts/coverage.sh
 ```
 
 **Terminal Output Preview:**
@@ -396,19 +388,6 @@ OVERALL LINE COVERAGE   : 85.8% (710/827 lines)
 OVERALL BRANCH COVERAGE : 73.1%
 ===========================================================================
 ```
-
-#### Option B: Built-in Coverlet MSBuild Output
-
-```powershell
-dotnet test -p:CollectCoverage=true
-```
-
-#### Option C: Generate Standard Cobertura XML (for CI/CD pipelines)
-
-```bash
-dotnet test --collect:"XPlat Code Coverage"
-```
-Generated reports are placed under `tests/YamlCLI.Tests/TestResults/`.
 
 ---
 
