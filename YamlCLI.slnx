@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/YamlCLI/YamlCLI.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/YamlCLI.Tests/YamlCLI.Tests.csproj" />
+  </Folder>
+</Solution>
