@@ -1,0 +1,22 @@
+steps:
+  - action: log
+    message: "Hello from YAML Action Runner!"
+
+  - action: set-var
+    name: greeting
+    value: "World"
+
+  - action: print-var
+    name: greeting
+
+  - action: log
+    message: "Greeting is: ${greeting}"
+
+  - action: delay
+    duration: 200
+
+  - action: assert
+    condition: "1 + 2 == 3"
+
+  - action: assert
+    condition: "10 > 5"
