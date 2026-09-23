@@ -13,10 +13,10 @@ steps:
     message: "Greeting is: ${greeting}"
 
   - action: delay
-    duration: 200
+    duration: 2000
 
   - action: assert
-    condition: "1 + 2 == 3"
+    condition: "1 + 2 == 4"
 
   - action: assert
     condition: "10 > 5"

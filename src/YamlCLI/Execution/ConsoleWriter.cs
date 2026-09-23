@@ -87,7 +87,18 @@ public class ConsoleWriter
         WriteColored(failed > 0 ? "FAILED" : "PASSED", color);
         Console.WriteLine();
 
-        Console.WriteLine($"  Steps: {succeeded}/{total} succeeded, {failed} failed");
+        var executed = succeeded + failed;
+        var skipped = total - executed;
+
+        if (skipped > 0)
+        {
+            Console.WriteLine($"  Steps: {succeeded}/{executed} succeeded, {failed} failed ({skipped} skipped)");
+        }
+        else
+        {
+            Console.WriteLine($"  Steps: {succeeded}/{total} succeeded, {failed} failed");
+        }
+
         Console.WriteLine($"  Duration: {elapsed.TotalMilliseconds:F0}ms");
 
         WriteColored("───────────────────────────────────", ConsoleColor.DarkGray);

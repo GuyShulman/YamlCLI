@@ -138,6 +138,27 @@ public class StepRunnerTests
         Assert.Contains("1 failed", output);
     }
 
+    [Fact]
+    public async Task RunAsync_FailureSummaryShowsExecutedAndSkippedCount()
+    {
+        var yaml = """
+            steps:
+              - action: log
+                message: "OK step"
+              - action: assert
+                condition: "1 == 99"
+              - action: log
+                message: "Never reached"
+            """;
+
+        var output = await RunYamlCaptureOutput(yaml);
+
+        Assert.Contains("FAILED", output);
+        Assert.Contains("1/2 succeeded", output);
+        Assert.Contains("1 failed", output);
+        Assert.Contains("1 skipped", output);
+    }
+
     // --- Helper methods ---
 
     private static async Task<(bool success, ExecutionContext context)> RunYaml(
