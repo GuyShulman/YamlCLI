@@ -152,13 +152,21 @@ public class Program
         Console.WriteLine("    yamlcli --file workflow.yaml --verbose");
         Console.WriteLine("    yamlcli --file workflow.yaml --dry-run");
         Console.WriteLine();
-        Console.WriteLine("  SUPPORTED ACTIONS:");
-        Console.WriteLine("    log        Log a message to the console");
-        Console.WriteLine("    delay      Wait for a given duration (in ms)");
-        Console.WriteLine("    assert     Evaluate a condition; fail if false");
-        Console.WriteLine("    http       Make an HTTP GET or POST request");
-        Console.WriteLine("    set-var    Set a variable in memory");
-        Console.WriteLine("    print-var  Print the value of a variable");
+        Console.WriteLine("  SUPPORTED ACTIONS (11 total):");
+        Console.WriteLine("    Core Actions:");
+        Console.WriteLine("      log        Log a message to the console (supports ${var})");
+        Console.WriteLine("      delay      Wait for a given duration in ms");
+        Console.WriteLine("      assert     Evaluate a condition expression; fail if false");
+        Console.WriteLine("      http       Make an HTTP GET or POST request");
+        Console.WriteLine("      set-var    Set a variable in memory");
+        Console.WriteLine("      print-var  Print the value of a variable");
+        Console.WriteLine();
+        Console.WriteLine("    Advanced Actions:");
+        Console.WriteLine("      parallel   Execute a list of steps concurrently");
+        Console.WriteLine("      retry      Retry a step N times on failure with optional delay");
+        Console.WriteLine("      shell      Execute a shell command, stream and capture output");
+        Console.WriteLine("      condition  Conditionally branch execution (if/then/else)");
+        Console.WriteLine("      import     Import and run another YAML workflow file");
         Console.WriteLine();
     }
 }
