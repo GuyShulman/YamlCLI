@@ -1,4 +1,5 @@
 using YamlCLI.Actions;
+using YamlCLI.Execution;
 using YamlCLI.Models;
 using ExecutionContext = YamlCLI.Models.ExecutionContext;
 
@@ -34,6 +35,18 @@ public class ActionTests
         var output = await CaptureConsoleOutput(() => action.ExecuteAsync(step, _context));
 
         Assert.Contains("Hello, World!", output);
+    }
+
+    [Fact]
+    public void Interpolate_VariablesWithHyphensAndDots_AreResolvedCorrectly()
+    {
+        _context.SetVariable("user-id", "12345");
+        _context.SetVariable("api.url", "https://api.test.com");
+        _context.SetVariable("nested_name", "alpha");
+
+        var result = _context.Interpolate("Fetching ${api.url}/users/${user-id}?type=${nested_name}");
+
+        Assert.Equal("Fetching https://api.test.com/users/12345?type=alpha", result);
     }
 
     [Fact]
@@ -106,6 +119,32 @@ public class ActionTests
         var step = CreateStep("assert", ("condition", "x > 5"));
 
         // Should not throw
+        await CaptureConsoleOutput(() => action.ExecuteAsync(step, _context));
+    }
+
+    [Fact]
+    public async Task AssertAction_DoesNotReplaceVariableSubstringInsideStringLiteral()
+    {
+        var action = new AssertAction();
+        _context.SetVariable("x", 10);
+        _context.SetVariable("animal", "foxes");
+        // "foxes" contains "x", but should not be replaced with "fo10es"
+        var step = CreateStep("assert", ("condition", "animal == \"foxes\""));
+
+        await CaptureConsoleOutput(() => action.ExecuteAsync(step, _context));
+    }
+
+    [Fact]
+    public async Task AssertAction_WithManyVariables_EvaluatesCorrectly()
+    {
+        var action = new AssertAction();
+        for (int i = 0; i < 25; i++)
+        {
+            _context.SetVariable($"var_{i}", i);
+        }
+        _context.SetVariable("target", 42);
+        var step = CreateStep("assert", ("condition", "target == 42 && var_10 > 5"));
+
         await CaptureConsoleOutput(() => action.ExecuteAsync(step, _context));
     }
 
@@ -191,6 +230,41 @@ public class ActionTests
     }
 
     [Fact]
+    public void ActionRegistry_ConstructorWithAssemblies_DiscoversActions()
+    {
+        var registry = new ActionRegistry(typeof(IStepAction).Assembly);
+
+        Assert.True(registry.HasAction("log"));
+        Assert.True(registry.HasAction("assert"));
+        Assert.Equal(11, registry.GetRegisteredActions().Count());
+    }
+
+    [Fact]
+    public void ActionRegistry_RegisterFactory_OverridesActionWithDependencyInjection()
+    {
+        var customHttpClient = new HttpClient();
+        var registry = new ActionRegistry();
+
+        // Register HttpAction with injected custom HttpClient
+        registry.RegisterFactory("http", () => new HttpAction(customHttpClient));
+
+        var action = registry.GetAction("http");
+        Assert.IsType<HttpAction>(action);
+    }
+
+    [Fact]
+    public void ActionRegistry_RegisterFactory_CreatesFreshInstancePerInvocation()
+    {
+        var registry = new ActionRegistry();
+
+        var instance1 = registry.GetAction("log");
+        var instance2 = registry.GetAction("log");
+
+        // Discovered factories produce fresh instances
+        Assert.NotSame(instance1, instance2);
+    }
+
+    [Fact]
     public async Task ExecutionContext_ExecuteStepsAsync_ExecutesAllSteps()
     {
         var steps = new List<StepDefinition>
@@ -227,6 +301,225 @@ public class ActionTests
         var registry = new ActionRegistry();
 
         Assert.Throws<StepExecutionException>(() => registry.GetAction("unknown-action"));
+    }
+
+    [Fact]
+    public void AllStepActions_MeetArchitecturalStandards()
+    {
+        var actionTypes = typeof(IStepAction).Assembly.GetTypes()
+            .Where(t => typeof(IStepAction).IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract)
+            .ToList();
+
+        Assert.NotEmpty(actionTypes);
+
+        var actionNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var type in actionTypes)
+        {
+            // 1. Must have a public parameterless constructor
+            var ctor = type.GetConstructor(Type.EmptyTypes);
+            Assert.True(ctor != null && ctor.IsPublic,
+                $"Action '{type.FullName}' must have a public parameterless constructor.");
+
+            // 2. Must instantiate cleanly
+            var instance = (IStepAction)Activator.CreateInstance(type)!;
+            Assert.NotNull(instance);
+
+            // 3. ActionType must be a non-empty, lowercase string
+            Assert.False(string.IsNullOrWhiteSpace(instance.ActionType),
+                $"Action '{type.FullName}' has an invalid empty ActionType.");
+            Assert.Equal(instance.ActionType.ToLowerInvariant(), instance.ActionType);
+
+            // 4. ActionType must be unique across all classes
+            Assert.True(actionNames.Add(instance.ActionType),
+                $"Duplicate ActionType '{instance.ActionType}' in '{type.FullName}'.");
+
+            // 5. AllowedProperties must be defined and valid
+            Assert.NotNull(instance.AllowedProperties);
+            Assert.All(instance.AllowedProperties, prop =>
+            {
+                Assert.False(string.IsNullOrWhiteSpace(prop));
+                Assert.Equal(prop.ToLowerInvariant(), prop);
+            });
+        }
+    }
+
+    [Fact]
+    public void ActionRegistry_DetectsMissingParameterlessConstructor_ThrowsInvalidOperationException()
+    {
+        var registry = new ActionRegistry();
+
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => registry.DiscoverFromTypes(new[] { typeof(ActionWithoutDefaultCtor) }));
+
+        Assert.Contains("does not have a public parameterless constructor", ex.Message);
+    }
+
+    [Fact]
+    public void ActionRegistry_DetectsDuplicateActionName_ThrowsInvalidOperationException()
+    {
+        var registry = new ActionRegistry();
+
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => registry.DiscoverFromTypes(new[] { typeof(DuplicateLogAction) }));
+
+        Assert.Contains("Duplicate action name 'log' detected", ex.Message);
+    }
+
+    [Fact]
+    public void ActionRegistry_DetectsEmptyActionType_ThrowsInvalidOperationException()
+    {
+        var registry = new ActionRegistry();
+
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => registry.DiscoverFromTypes(new[] { typeof(EmptyNameAction) }));
+
+        Assert.Contains("returned a null, empty, or whitespace ActionType", ex.Message);
+    }
+
+    [Fact]
+    public void ActionRegistry_RegisterAction_RegistersActionInstance()
+    {
+        var registry = new ActionRegistry();
+        var mockAction = new DuplicateLogAction(); // ActionType => "log"
+        registry.RegisterAction(mockAction);
+
+        var retrieved = registry.GetAction("log");
+        Assert.Same(mockAction, retrieved);
+    }
+
+    [Fact]
+    public void ActionRegistry_ConstructorThrowsException_ThrowsInvalidOperationException()
+    {
+        var registry = new ActionRegistry();
+
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => registry.DiscoverFromTypes(new[] { typeof(FailingConstructorAction) }));
+
+        Assert.Contains("Failed to instantiate action class", ex.Message);
+    }
+
+    [Fact]
+    public void StepDefinition_GetRequiredInt_MissingKey_ThrowsException()
+    {
+        var step = new StepDefinition { Action = "test" };
+
+        var ex = Assert.Throws<StepExecutionException>(() => step.GetRequiredInt("missingKey"));
+        Assert.Contains("Missing required property 'missingKey'", ex.Message);
+    }
+
+    [Fact]
+    public void StepDefinition_GetOptionalInt_VariousTypesAndDefaults()
+    {
+        var step = new StepDefinition { Action = "test" };
+
+        // Missing key returns default
+        Assert.Equal(10, step.GetOptionalInt("missing", 10));
+
+        // Long value
+        step.Properties["longVal"] = 123456789L;
+        Assert.Equal(123456789, step.GetOptionalInt("longVal"));
+
+        // Parseable string
+        step.Properties["strVal"] = "42";
+        Assert.Equal(42, step.GetOptionalInt("strVal"));
+
+        // Unparseable value returns default
+        step.Properties["invalidVal"] = "not_a_number";
+        Assert.Equal(99, step.GetOptionalInt("invalidVal", 99));
+    }
+
+    [Fact]
+    public void StepDefinition_GetNestedStepsAndStep_ReturnsExpected()
+    {
+        var step = new StepDefinition { Action = "test" };
+
+        // Missing returns null
+        Assert.Null(step.GetNestedSteps("missing"));
+        Assert.Null(step.GetNestedStep("missing"));
+
+        // Present List<StepDefinition>
+        var nestedList = new List<StepDefinition> { new StepDefinition { Action = "sub" } };
+        step.Properties["steps"] = nestedList;
+        Assert.Same(nestedList, step.GetNestedSteps("steps"));
+
+        // Present StepDefinition
+        var singleStep = new StepDefinition { Action = "single" };
+        step.Properties["step"] = singleStep;
+        Assert.Same(singleStep, step.GetNestedStep("step"));
+    }
+
+    [Fact]
+    public void StepDefinition_GetSteps_WithInvalidType_ReturnsEmptyList()
+    {
+        var step = new StepDefinition { Action = "test" };
+        step.Properties["invalidSteps"] = 12345;
+
+        var result = step.GetSteps("invalidSteps");
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void StepDefinition_ToString_FormatsCorrectly()
+    {
+        var step = new StepDefinition { Action = "myAction" };
+        step.Properties["key1"] = "val1";
+        step.Properties["key2"] = 2;
+
+        var str = step.ToString();
+        Assert.Contains("[myAction]", str);
+        Assert.Contains("key1=val1", str);
+        Assert.Contains("key2=2", str);
+    }
+
+    [Fact]
+    public void ExecutionContext_Interpolate_UnresolvedVariable_LeavesAsIs()
+    {
+        var context = new YamlCLI.Models.ExecutionContext();
+        var result = context.Interpolate("Hello ${nonexistent} World");
+        Assert.Equal("Hello ${nonexistent} World", result);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ConditionEvaluator_EmptyOrWhitespace_ThrowsException(string condition)
+    {
+        var context = new YamlCLI.Models.ExecutionContext();
+        var ex = Assert.Throws<StepExecutionException>(() => Execution.ConditionEvaluator.Evaluate(condition, context));
+        Assert.Contains("Condition expression cannot be empty", ex.Message);
+    }
+
+    [Fact]
+    public void ConditionEvaluator_InvalidSyntax_ThrowsException()
+    {
+        var context = new YamlCLI.Models.ExecutionContext();
+        var ex = Assert.Throws<StepExecutionException>(() => Execution.ConditionEvaluator.Evaluate("1 == = 2", context));
+        Assert.Contains("Failed to evaluate condition", ex.Message);
+    }
+
+    [Fact]
+    public void ConditionEvaluator_BooleanAndObjectVariables_EvaluatesCorrectly()
+    {
+        var context = new YamlCLI.Models.ExecutionContext();
+        context.SetVariable("isEnabled", true);
+        context.SetVariable("isFinished", false);
+        context.SetVariable("myObj", new DateTime(2026, 1, 1));
+
+        Assert.True(Execution.ConditionEvaluator.Evaluate("isEnabled == true", context));
+        Assert.True(Execution.ConditionEvaluator.Evaluate("isFinished == false", context));
+        Assert.True(Execution.ConditionEvaluator.Evaluate("myObj != \"\"", context));
+    }
+
+    [Fact]
+    public async Task StepExecutor_Verbose_LogsNestedExecution()
+    {
+        var context = new YamlCLI.Models.ExecutionContext { IsVerbose = true, Console = new ConsoleWriter() };
+        var executor = new StepExecutor();
+        var step = CreateStep("log", ("message", "test"));
+
+        var output = await CaptureConsoleOutput(() => executor.ExecuteStepAsync(step, context));
+        Assert.Contains("Executing nested log:", output);
     }
 
     [Fact]
@@ -345,5 +638,38 @@ public class ActionTests
         {
             Console.SetOut(originalOut);
         }
+    }
+
+    private class ActionWithoutDefaultCtor : IStepAction
+    {
+        public ActionWithoutDefaultCtor(string requiredArg) { }
+        public string ActionType => "no-default-ctor";
+        public IReadOnlySet<string> AllowedProperties => new HashSet<string>();
+        public Task ExecuteAsync(StepDefinition step, YamlCLI.Models.ExecutionContext context) => Task.CompletedTask;
+    }
+
+    private class DuplicateLogAction : IStepAction
+    {
+        public string ActionType => "log";
+        public IReadOnlySet<string> AllowedProperties => new HashSet<string>();
+        public Task ExecuteAsync(StepDefinition step, YamlCLI.Models.ExecutionContext context) => Task.CompletedTask;
+    }
+
+    private class EmptyNameAction : IStepAction
+    {
+        public string ActionType => "   ";
+        public IReadOnlySet<string> AllowedProperties => new HashSet<string>();
+        public Task ExecuteAsync(StepDefinition step, YamlCLI.Models.ExecutionContext context) => Task.CompletedTask;
+    }
+
+    private class FailingConstructorAction : IStepAction
+    {
+        public FailingConstructorAction()
+        {
+            throw new InvalidOperationException("Boom in constructor");
+        }
+        public string ActionType => "failing-ctor";
+        public IReadOnlySet<string> AllowedProperties => new HashSet<string>();
+        public Task ExecuteAsync(StepDefinition step, YamlCLI.Models.ExecutionContext context) => Task.CompletedTask;
     }
 }

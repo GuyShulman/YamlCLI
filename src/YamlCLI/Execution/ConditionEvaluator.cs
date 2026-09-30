@@ -43,20 +43,13 @@ public static class ConditionEvaluator
     /// </summary>
     private static string SubstituteVariables(string expression, ExecutionContext context)
     {
-        var result = expression;
-
-        foreach (var kvp in context.Variables)
+        return Regex.Replace(expression, @"\b([a-zA-Z_][\w.-]*)\b", match =>
         {
-            var placeholder = kvp.Key;
-            var value = kvp.Value;
-
-            // Replace variable references with their values using word boundary matching
-            var pattern = $@"\b{Regex.Escape(placeholder)}\b";
-            var replacement = FormatValueForExpression(value);
-            result = Regex.Replace(result, pattern, replacement);
-        }
-
-        return result;
+            var token = match.Groups[1].Value;
+            if (context.Variables.TryGetValue(token, out var value))
+                return FormatValueForExpression(value);
+            return match.Value; // Leave non-variable tokens as-is
+        });
     }
 
     /// <summary>
