@@ -4,15 +4,36 @@ namespace YamlCLI.Execution;
 /// Provides colorized console output for the CLI tool.
 /// Uses ANSI escape codes for colored status indicators.
 /// </summary>
-public class ConsoleWriter
+public class ConsoleWriter : IConsoleWriter
 {
+    private readonly TextWriter? _customOut;
+
+    /// <summary>
+    /// Initializes a new instance of ConsoleWriter that writes dynamically to Console.Out.
+    /// </summary>
+    public ConsoleWriter()
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of ConsoleWriter that writes to the specified TextWriter.
+    /// If null is passed, defaults to dynamic Console.Out.
+    /// </summary>
+    /// <param name="output">The target text writer (e.g., StreamWriter for a file, StringWriter for tests).</param>
+    public ConsoleWriter(TextWriter? output)
+    {
+        _customOut = output;
+    }
+
+    private TextWriter Out => _customOut ?? Console.Out;
+
     /// <summary>
     /// Writes a success message with a green checkmark.
     /// </summary>
     public void Success(string message)
     {
         WriteColored("  ✓ ", ConsoleColor.Green);
-        Console.WriteLine(message);
+        Out.WriteLine(message);
     }
 
     /// <summary>
@@ -21,7 +42,7 @@ public class ConsoleWriter
     public void Error(string message)
     {
         WriteColored("  ✗ ", ConsoleColor.Red);
-        Console.WriteLine(message);
+        Out.WriteLine(message);
     }
 
     /// <summary>
@@ -30,7 +51,7 @@ public class ConsoleWriter
     public void Warning(string message)
     {
         WriteColored("  ⚠ ", ConsoleColor.Yellow);
-        Console.WriteLine(message);
+        Out.WriteLine(message);
     }
 
     /// <summary>
@@ -39,7 +60,7 @@ public class ConsoleWriter
     public void Info(string message)
     {
         WriteColored("  ⚡ ", ConsoleColor.Cyan);
-        Console.WriteLine(message);
+        Out.WriteLine(message);
     }
 
     /// <summary>
@@ -49,7 +70,7 @@ public class ConsoleWriter
     {
         var prefix = isDryRun ? "[DRY-RUN] " : "";
         WriteColored($"  ► ", ConsoleColor.DarkCyan);
-        Console.WriteLine($"{prefix}Step {stepNumber}: {actionType}");
+        Out.WriteLine($"{prefix}Step {stepNumber}: {actionType}");
     }
 
     /// <summary>
@@ -57,7 +78,7 @@ public class ConsoleWriter
     /// </summary>
     public void Message(string message)
     {
-        Console.WriteLine($"    {message}");
+        Out.WriteLine($"    {message}");
     }
 
     /// <summary>
@@ -65,12 +86,12 @@ public class ConsoleWriter
     /// </summary>
     public void Header(string message)
     {
-        Console.WriteLine();
+        Out.WriteLine();
         WriteColored("═══ ", ConsoleColor.DarkGray);
-        Console.Write(message);
+        Out.Write(message);
         WriteColored(" ═══", ConsoleColor.DarkGray);
-        Console.WriteLine();
-        Console.WriteLine();
+        Out.WriteLine();
+        Out.WriteLine();
     }
 
     /// <summary>
@@ -78,38 +99,45 @@ public class ConsoleWriter
     /// </summary>
     public void Summary(int total, int succeeded, int failed, TimeSpan elapsed)
     {
-        Console.WriteLine();
+        Out.WriteLine();
         WriteColored("───────────────────────────────────", ConsoleColor.DarkGray);
-        Console.WriteLine();
+        Out.WriteLine();
 
         var color = failed > 0 ? ConsoleColor.Red : ConsoleColor.Green;
         WriteColored($"  Result: ", ConsoleColor.White);
         WriteColored(failed > 0 ? "FAILED" : "PASSED", color);
-        Console.WriteLine();
+        Out.WriteLine();
 
         var executed = succeeded + failed;
         var skipped = total - executed;
 
         if (skipped > 0)
         {
-            Console.WriteLine($"  Steps: {succeeded}/{executed} succeeded, {failed} failed ({skipped} skipped)");
+            Out.WriteLine($"  Steps: {succeeded}/{executed} succeeded, {failed} failed ({skipped} skipped)");
         }
         else
         {
-            Console.WriteLine($"  Steps: {succeeded}/{total} succeeded, {failed} failed");
+            Out.WriteLine($"  Steps: {succeeded}/{total} succeeded, {failed} failed");
         }
 
-        Console.WriteLine($"  Duration: {elapsed.TotalMilliseconds:F0}ms");
+        Out.WriteLine($"  Duration: {elapsed.TotalMilliseconds:F0}ms");
 
         WriteColored("───────────────────────────────────", ConsoleColor.DarkGray);
-        Console.WriteLine();
+        Out.WriteLine();
     }
 
     private void WriteColored(string text, ConsoleColor color)
     {
-        var prev = Console.ForegroundColor;
-        Console.ForegroundColor = color;
-        Console.Write(text);
-        Console.ForegroundColor = prev;
+        if (_customOut == null || _customOut == Console.Out)
+        {
+            var prev = Console.ForegroundColor;
+            Console.ForegroundColor = color;
+            Out.Write(text);
+            Console.ForegroundColor = prev;
+        }
+        else
+        {
+            _customOut.Write(text);
+        }
     }
 }

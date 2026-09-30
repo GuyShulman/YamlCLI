@@ -6,8 +6,8 @@ namespace YamlCLI.Actions;
 
 /// <summary>
 /// Conditionally runs steps based on a variable or boolean expression.
-/// Supports 'if' / 'condition' for the expression, 'then' / 'steps' for true branch,
-/// and optional 'else' for false branch.
+/// Strictly requires 'if' for the expression and 'then' for the true branch,
+/// with an optional 'else' branch.
 /// 
 /// YAML usage:
 ///   - action: condition
@@ -21,24 +21,25 @@ namespace YamlCLI.Actions;
 /// </summary>
 public class ConditionAction : IStepAction
 {
+    private static readonly HashSet<string> s_allowedProperties = new(StringComparer.Ordinal)
+    {
+        "if", "then", "else"
+    };
+
     public string ActionType => "condition";
+    public IReadOnlySet<string> AllowedProperties => s_allowedProperties;
 
     public async Task ExecuteAsync(StepDefinition step, ExecutionContext context)
     {
-        var condition = step.GetOptionalString("if")
-            ?? step.GetOptionalString("condition");
+        this.Validate(step);
 
-        if (string.IsNullOrWhiteSpace(condition))
-            throw new StepExecutionException("Action 'condition' requires an 'if' or 'condition' property.");
+        var condition = step.GetRequiredString("if");
 
         var thenSteps = step.GetSteps("then");
-        if (thenSteps.Count == 0)
-            thenSteps = step.GetSteps("steps");
-
         var elseSteps = step.GetSteps("else");
 
         if (thenSteps.Count == 0 && elseSteps.Count == 0)
-            throw new StepExecutionException("Action 'condition' requires 'then' or 'steps' to execute.");
+            throw new StepExecutionException("Action 'condition' requires 'then' to execute.");
 
         if (context.IsDryRun)
         {

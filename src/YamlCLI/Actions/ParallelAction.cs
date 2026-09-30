@@ -16,15 +16,16 @@ namespace YamlCLI.Actions;
 /// </summary>
 public class ParallelAction : IStepAction
 {
+    private static readonly HashSet<string> s_allowedProperties = new(StringComparer.Ordinal) { "steps" };
+
     public string ActionType => "parallel";
+    public IReadOnlySet<string> AllowedProperties => s_allowedProperties;
 
     public async Task ExecuteAsync(StepDefinition step, ExecutionContext context)
     {
+        this.Validate(step);
+
         var steps = step.GetSteps("steps");
-        if (steps.Count == 0)
-        {
-            steps = step.GetSteps("actions");
-        }
 
         if (steps.Count == 0)
         {
@@ -49,21 +50,26 @@ public class ParallelAction : IStepAction
             await context.ExecuteStepAsync(childStep);
         });
 
+        var allTasks = Task.WhenAll(tasks);
         try
         {
-            await Task.WhenAll(tasks);
+            await allTasks;
         }
         catch (Exception ex)
         {
-            if (ex is AggregateException agg)
+            var agg = allTasks.Exception ?? (ex as AggregateException);
+            var stepExceptions = agg?.InnerExceptions.OfType<StepExecutionException>().ToList() ?? new List<StepExecutionException>();
+            if (stepExceptions.Count == 1)
             {
-                var stepEx = agg.InnerExceptions.OfType<StepExecutionException>().FirstOrDefault();
-                if (stepEx != null) throw stepEx;
-
-                throw new StepExecutionException($"One or more parallel steps failed: {agg.InnerException?.Message}", agg);
+                throw stepExceptions[0];
+            }
+            if (stepExceptions.Count > 1)
+            {
+                var messages = string.Join("; ", stepExceptions.Select(e => e.Message));
+                throw new StepExecutionException($"Multiple parallel steps failed: {messages}", agg ?? ex);
             }
 
-            throw;
+            throw new StepExecutionException($"One or more parallel steps failed: {agg?.InnerException?.Message ?? ex.Message}", agg ?? ex);
         }
     }
 }

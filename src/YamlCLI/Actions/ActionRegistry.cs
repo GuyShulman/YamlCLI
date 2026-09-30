@@ -4,32 +4,49 @@ namespace YamlCLI.Actions;
 
 /// <summary>
 /// Registry that auto-discovers and manages all IStepAction implementations.
-/// Uses reflection to scan the assembly, so adding a new action is simply creating a class
-/// that implements IStepAction — no registration code needed.
+/// Uses reflection to scan assemblies and supports factory-based dependency injection.
 /// </summary>
 public class ActionRegistry
 {
-    private readonly Dictionary<string, IStepAction> _actions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Func<IStepAction>> _actions = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Creates a new ActionRegistry and auto-discovers all IStepAction implementations
-    /// in the executing assembly.
+    /// in the YamlCLI assembly.
     /// </summary>
     public ActionRegistry()
+        : this(typeof(IStepAction).Assembly)
     {
-        DiscoverActions();
+    }
+
+    /// <summary>
+    /// Creates a new ActionRegistry and auto-discovers all IStepAction implementations
+    /// from the specified assemblies.
+    /// </summary>
+    /// <param name="assemblies">Assemblies to scan for IStepAction implementations.</param>
+    public ActionRegistry(params Assembly[] assemblies)
+    {
+        var targets = assemblies is { Length: > 0 }
+            ? assemblies
+            : new[] { typeof(IStepAction).Assembly };
+
+        foreach (var asm in targets)
+        {
+            DiscoverActionsFrom(asm);
+        }
     }
 
     /// <summary>
     /// Gets the action handler for the given action type.
+    /// Resolves the action via its registered factory.
     /// </summary>
     /// <param name="actionType">The action type string (e.g., "log", "delay").</param>
-    /// <returns>The IStepAction implementation for the action type.</returns>
+    /// <returns>A new or configured IStepAction implementation for the action type.</returns>
     /// <exception cref="Models.StepExecutionException">Thrown if the action type is unknown.</exception>
     public IStepAction GetAction(string actionType)
     {
-        if (_actions.TryGetValue(actionType, out var action))
-            return action;
+        if (_actions.TryGetValue(actionType, out var factory))
+            return factory();
 
         var available = string.Join(", ", _actions.Keys.OrderBy(k => k));
         throw new Models.StepExecutionException(
@@ -53,30 +70,75 @@ public class ActionRegistry
     }
 
     /// <summary>
-    /// Manually registers an action (useful for testing or plugin systems).
+    /// Manually registers an action instance (useful for testing or simple overrides).
     /// </summary>
     public void RegisterAction(IStepAction action)
     {
-        _actions[action.ActionType] = action;
+        RegisterFactory(action.ActionType, () => action);
     }
 
     /// <summary>
-    /// Scans the executing assembly for all types implementing IStepAction
-    /// and registers them.
+    /// Registers a factory function for creating an action (enables dependency injection).
     /// </summary>
-    private void DiscoverActions()
+    /// <param name="actionType">The action type string.</param>
+    /// <param name="factory">The factory function returning an IStepAction instance.</param>
+    public void RegisterFactory(string actionType, Func<IStepAction> factory)
+    {
+        _actions[actionType] = factory;
+    }
+
+    /// <summary>
+    /// Scans the given assembly for all types implementing IStepAction
+    /// and registers factory functions for them.
+    /// </summary>
+    private void DiscoverActionsFrom(Assembly assembly)
     {
         var actionInterface = typeof(IStepAction);
-        var actionTypes = Assembly.GetExecutingAssembly()
+        var actionTypes = assembly
             .GetTypes()
             .Where(t => actionInterface.IsAssignableFrom(t) && t is { IsInterface: false, IsAbstract: false });
 
-        foreach (var type in actionTypes)
+        DiscoverFromTypes(actionTypes);
+    }
+
+    internal void DiscoverFromTypes(IEnumerable<Type> types)
+    {
+        foreach (var type in types)
         {
-            if (Activator.CreateInstance(type) is IStepAction action)
+            var ctor = type.GetConstructor(Type.EmptyTypes);
+            if (ctor == null || !ctor.IsPublic)
             {
-                _actions[action.ActionType] = action;
+                throw new InvalidOperationException(
+                    $"Action class '{type.FullName}' implements IStepAction but does not have a public parameterless constructor. " +
+                    $"Either add a public parameterless constructor or register it manually via ActionRegistry.RegisterFactory().");
             }
+
+            IStepAction sample;
+            try
+            {
+                sample = (IStepAction)Activator.CreateInstance(type)!;
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to instantiate action class '{type.FullName}' during discovery: {ex.InnerException?.Message ?? ex.Message}", ex);
+            }
+
+            var actionType = sample.ActionType;
+            if (string.IsNullOrWhiteSpace(actionType))
+            {
+                throw new InvalidOperationException(
+                    $"Action class '{type.FullName}' returned a null, empty, or whitespace ActionType.");
+            }
+
+            if (_actions.ContainsKey(actionType))
+            {
+                throw new InvalidOperationException(
+                    $"Duplicate action name '{actionType}' detected! " +
+                    $"Class '{type.FullName}' conflicts with an already registered action.");
+            }
+
+            _actions[actionType] = () => (IStepAction)Activator.CreateInstance(type)!;
         }
     }
 }

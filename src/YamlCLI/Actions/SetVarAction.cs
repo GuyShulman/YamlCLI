@@ -18,16 +18,21 @@ namespace YamlCLI.Actions;
 /// </summary>
 public class SetVarAction : IStepAction
 {
+    private static readonly HashSet<string> s_allowedProperties = new(StringComparer.Ordinal) { "name", "value" };
+
     public string ActionType => "set-var";
+    public IReadOnlySet<string> AllowedProperties => s_allowedProperties;
 
     public Task ExecuteAsync(StepDefinition step, ExecutionContext context)
     {
+        this.Validate(step);
+
         var name = step.GetRequiredString("name");
         var rawValue = step.GetRequiredString("value");
         var value = context.Interpolate(rawValue);
 
         context.SetVariable(name, value);
-        Console.WriteLine($"    Set '{name}' = '{value}'");
+        context.Console.Message($"Set '{name}' = '{value}'");
 
         return Task.CompletedTask;
     }

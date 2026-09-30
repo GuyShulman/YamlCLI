@@ -5,53 +5,41 @@ namespace YamlCLI.Actions;
 
 /// <summary>
 /// Retries a step or a list of steps up to N times if it fails.
-/// Supports configurable attempts and optional delay between retries.
+/// Supports configurable attempts and optional delay-ms between retries.
 /// 
 /// YAML usage:
 ///   - action: retry
 ///     attempts: 3
-///     delay: 500
+///     delay-ms: 500
 ///     step:
 ///       action: http
 ///       url: "https://api.example.com/data"
-/// 
-///   - action: retry
-///     count: 3
-///     steps:
-///       - action: log
-///         message: "Trying..."
 /// </summary>
 public class RetryAction : IStepAction
 {
+    private static readonly HashSet<string> s_allowedProperties = new(StringComparer.Ordinal)
+    {
+        "attempts", "delay-ms", "step"
+    };
+
     public string ActionType => "retry";
+    public IReadOnlySet<string> AllowedProperties => s_allowedProperties;
 
     public async Task ExecuteAsync(StepDefinition step, ExecutionContext context)
     {
-        var attempts = 3;
-        if (step.Properties.ContainsKey("attempts"))
-            attempts = step.GetRequiredInt("attempts");
-        else if (step.Properties.ContainsKey("count"))
-            attempts = step.GetRequiredInt("count");
-        else if (step.Properties.ContainsKey("times"))
-            attempts = step.GetRequiredInt("times");
-        else if (step.Properties.ContainsKey("retries"))
-            attempts = step.GetRequiredInt("retries") + 1;
+        this.Validate(step);
 
+        var attempts = step.GetOptionalInt("attempts", 3);
         if (attempts <= 0)
             throw new StepExecutionException($"Action 'retry' requires attempts > 0, got {attempts}.");
 
-        var delayMs = step.GetOptionalInt("delay", 0);
-        if (delayMs == 0 && step.Properties.ContainsKey("delay-ms"))
-            delayMs = step.GetRequiredInt("delay-ms");
+        var delayMs = step.GetOptionalInt("delay-ms", 0);
+        if (delayMs < 0)
+            throw new StepExecutionException($"Action 'retry' delay-ms must be non-negative, got {delayMs}.");
 
-        var steps = step.GetSteps("steps");
+        var steps = step.GetSteps("step");
         if (steps.Count == 0)
-        {
-            steps = step.GetSteps("step");
-        }
-
-        if (steps.Count == 0)
-            throw new StepExecutionException("Action 'retry' requires a 'step' or 'steps' property.");
+            throw new StepExecutionException("Action 'retry' requires a 'step' property.");
 
         if (context.IsDryRun)
         {

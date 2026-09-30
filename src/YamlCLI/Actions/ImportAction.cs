@@ -15,15 +15,16 @@ namespace YamlCLI.Actions;
 /// </summary>
 public class ImportAction : IStepAction
 {
+    private static readonly HashSet<string> s_allowedProperties = new(StringComparer.Ordinal) { "file" };
+
     public string ActionType => "import";
+    public IReadOnlySet<string> AllowedProperties => s_allowedProperties;
 
     public async Task ExecuteAsync(StepDefinition step, ExecutionContext context)
     {
-        var rawPath = step.GetOptionalString("file")
-            ?? step.GetOptionalString("path");
+        this.Validate(step);
 
-        if (string.IsNullOrWhiteSpace(rawPath))
-            throw new StepExecutionException("Action 'import' requires a 'file' or 'path' property.");
+        var rawPath = step.GetRequiredString("file");
 
         var filePath = context.Interpolate(rawPath);
 

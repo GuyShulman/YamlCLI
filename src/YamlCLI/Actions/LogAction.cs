@@ -13,13 +13,18 @@ namespace YamlCLI.Actions;
 /// </summary>
 public class LogAction : IStepAction
 {
+    private static readonly HashSet<string> s_allowedProperties = new(StringComparer.Ordinal) { "message" };
+
     public string ActionType => "log";
+    public IReadOnlySet<string> AllowedProperties => s_allowedProperties;
 
     public Task ExecuteAsync(StepDefinition step, ExecutionContext context)
     {
+        this.Validate(step);
+
         var message = step.GetRequiredString("message");
         var interpolated = context.Interpolate(message);
-        Console.WriteLine($"    {interpolated}");
+        context.Console.Message(interpolated);
         return Task.CompletedTask;
     }
 }

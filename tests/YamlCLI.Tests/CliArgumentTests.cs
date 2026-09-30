@@ -1,3 +1,6 @@
+using YamlCLI.Execution;
+using YamlCLI.Models;
+
 namespace YamlCLI.Tests;
 
 /// <summary>
@@ -112,6 +115,44 @@ public class CliArgumentTests
         Assert.Equal("test.yaml", result.FilePath);
         Assert.True(result.DryRun);
         Assert.True(result.Verbose);
+    }
+
+    [Fact]
+    public void ParseArguments_UnrecognizedOption_RecordsError()
+    {
+        var args = new[] { "--file", "test.yaml", "--unknown-flag" };
+
+        var result = Program.ParseArguments(args);
+
+        Assert.True(result.HasErrors);
+        Assert.Contains(result.Errors, e => e.Contains("Unrecognized option: '--unknown-flag'"));
+    }
+
+    [Fact]
+    public void ParseArguments_FileOptionWithoutValue_RecordsError()
+    {
+        var args = new[] { "--file" };
+
+        var result = Program.ParseArguments(args);
+
+        Assert.True(result.HasErrors);
+        Assert.Contains(result.Errors, e => e.Contains("Option '--file' requires a file path argument."));
+    }
+
+    [Fact]
+    public async Task Main_UnrecognizedOption_ReturnsOne()
+    {
+        var originalOut = Console.Out;
+        Console.SetOut(new StringWriter());
+        try
+        {
+            var exitCode = await Program.Main(new[] { "--invalid-option" });
+            Assert.Equal(1, exitCode);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
     }
 
     [Fact]
@@ -258,6 +299,49 @@ public class CliArgumentTests
         finally
         {
             Console.SetOut(originalOut);
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+        }
+    }
+
+    [Fact]
+    public async Task Main_StepExecutionException_ReturnsOne()
+    {
+        var tempFile = Path.Combine(Path.GetTempPath(), $"main_stepex_{Guid.NewGuid():N}.yaml");
+        File.WriteAllText(tempFile, "steps:\n  - message: 'Missing action field'");
+
+        var originalOut = Console.Out;
+        Console.SetOut(new StringWriter());
+        try
+        {
+            var exitCode = await Program.Main(new[] { "--file", tempFile });
+            Assert.Equal(1, exitCode);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_WithCustomConsoleWriter_ExecutesDirectly()
+    {
+        var tempFile = Path.Combine(Path.GetTempPath(), $"runasync_test_{Guid.NewGuid():N}.yaml");
+        File.WriteAllText(tempFile, "steps:\n  - action: log\n    message: 'Direct test'");
+
+        try
+        {
+            var sw = new StringWriter();
+            var console = new ConsoleWriter(sw);
+            var args = new CliArguments { FilePath = tempFile };
+
+            var exitCode = await Program.RunAsync(args, console);
+
+            Assert.Equal(0, exitCode);
+            Assert.Contains("Direct test", sw.ToString());
+        }
+        finally
+        {
             if (File.Exists(tempFile)) File.Delete(tempFile);
         }
     }

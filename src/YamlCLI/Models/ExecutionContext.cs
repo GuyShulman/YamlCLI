@@ -11,8 +11,8 @@ namespace YamlCLI.Models;
 /// </summary>
 public class ExecutionContext
 {
-    private ActionRegistry? _registry;
-    private ConsoleWriter? _console;
+    private IStepExecutor? _executor;
+    private IConsoleWriter? _console;
 
     /// <summary>
     /// Thread-safe variables set by 'set-var' actions and available for interpolation and expressions.
@@ -36,53 +36,32 @@ public class ExecutionContext
     public string BasePath { get; set; } = string.Empty;
 
     /// <summary>
-    /// The action registry used to resolve and execute steps.
+    /// The step executor used to resolve and execute nested steps.
     /// </summary>
-    public ActionRegistry Registry
+    public IStepExecutor Executor
     {
-        get => _registry ??= new ActionRegistry();
-        set => _registry = value;
+        get => _executor ??= new StepExecutor();
+        set => _executor = value;
     }
 
     /// <summary>
     /// The console writer used for formatted terminal output.
     /// </summary>
-    public ConsoleWriter Console
+    public IConsoleWriter Console
     {
         get => _console ??= new ConsoleWriter();
         set => _console = value;
     }
 
     /// <summary>
-    /// Executes a single step using the configured ActionRegistry.
+    /// Executes a single step using the configured IStepExecutor.
     /// </summary>
-    public async Task ExecuteStepAsync(StepDefinition step)
-    {
-        if (IsDryRun)
-        {
-            Console.Message($"  [nested dry-run] {step.Action}");
-            return;
-        }
-
-        var action = Registry.GetAction(step.Action);
-        if (IsVerbose)
-        {
-            Console.Info($"Executing nested {step.Action}: {step}");
-        }
-
-        await action.ExecuteAsync(step, this);
-    }
+    public Task ExecuteStepAsync(StepDefinition step) => Executor.ExecuteStepAsync(step, this);
 
     /// <summary>
-    /// Executes a list of steps in sequence.
+    /// Executes a list of steps in sequence using the configured IStepExecutor.
     /// </summary>
-    public async Task ExecuteStepsAsync(List<StepDefinition> steps)
-    {
-        foreach (var step in steps)
-        {
-            await ExecuteStepAsync(step);
-        }
-    }
+    public Task ExecuteStepsAsync(List<StepDefinition> steps) => Executor.ExecuteStepsAsync(steps, this);
 
     /// <summary>
     /// Sets a variable in the execution context.
@@ -113,12 +92,13 @@ public class ExecutionContext
 
     /// <summary>
     /// Interpolates ${varName} references in a string with their variable values.
+    /// Supports alphanumeric characters, underscores, hyphens, and dots (e.g. ${user-id}, ${api.url}).
     /// </summary>
     public string Interpolate(string input)
     {
         if (string.IsNullOrEmpty(input)) return input;
 
-        return Regex.Replace(input, @"\$\{(\w+)\}", match =>
+        return Regex.Replace(input, @"\$\{([\w.-]+)\}", match =>
         {
             var varName = match.Groups[1].Value;
             if (Variables.TryGetValue(varName, out var value))

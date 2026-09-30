@@ -12,9 +12,9 @@ namespace YamlCLI.Execution;
 public class StepRunner
 {
     private readonly ActionRegistry _registry;
-    private readonly ConsoleWriter _console;
+    private readonly IConsoleWriter _console;
 
-    public StepRunner(ActionRegistry registry, ConsoleWriter console)
+    public StepRunner(ActionRegistry registry, IConsoleWriter console)
     {
         _registry = registry;
         _console = console;
@@ -26,7 +26,7 @@ public class StepRunner
     /// </summary>
     public async Task<bool> RunAsync(List<StepDefinition> steps, ExecutionContext context)
     {
-        context.Registry = _registry;
+        context.Executor = new StepExecutor(_registry);
         context.Console = _console;
 
         _console.Header("YAML Action Runner");
@@ -45,14 +45,15 @@ public class StepRunner
             {
                 _console.StepHeader(stepNumber, step.Action, context.IsDryRun);
 
+                var action = _registry.GetAction(step.Action);
+                action.Validate(step);
+
                 if (context.IsDryRun)
                 {
                     PrintDryRunInfo(step);
                     succeeded++;
                     continue;
                 }
-
-                var action = _registry.GetAction(step.Action);
 
                 if (context.IsVerbose)
                 {

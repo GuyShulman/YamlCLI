@@ -49,7 +49,7 @@ steps:
 
   - action: retry
     attempts: 3
-    delay: 50
+    delay-ms: 50
     step:
       - action: log
         message: "Executing step with retry capability"

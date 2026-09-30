@@ -20,34 +20,28 @@ namespace YamlCLI.Actions;
 /// </summary>
 public class AssertAction : IStepAction
 {
+    private static readonly HashSet<string> s_allowedProperties = new(StringComparer.Ordinal) { "condition" };
+
     public string ActionType => "assert";
+    public IReadOnlySet<string> AllowedProperties => s_allowedProperties;
 
     public Task ExecuteAsync(StepDefinition step, ExecutionContext context)
     {
+        this.Validate(step);
+
         var condition = step.GetRequiredString("condition");
 
-        Console.WriteLine($"    Evaluating: {condition}");
+        context.Console.Message($"Evaluating: {condition}");
 
-        try
-        {
-            var result = Execution.ConditionEvaluator.Evaluate(condition, context);
+        var result = Execution.ConditionEvaluator.Evaluate(condition, context);
 
-            if (result)
-            {
-                Console.WriteLine($"    Assertion passed ✓");
-            }
-            else
-            {
-                throw new StepExecutionException($"Assertion failed: \"{condition}\" evaluated to false.");
-            }
-        }
-        catch (StepExecutionException)
+        if (result)
         {
-            throw; // Re-throw assertion failures as-is
+            context.Console.Message($"Assertion passed ✓");
         }
-        catch (Exception ex)
+        else
         {
-            throw new StepExecutionException($"Failed to evaluate assertion \"{condition}\": {ex.Message}", ex);
+            throw new StepExecutionException($"Assertion failed: \"{condition}\" evaluated to false.");
         }
 
         return Task.CompletedTask;

@@ -16,7 +16,7 @@ steps:
     duration: 2000
 
   - action: assert
-    condition: "1 + 2 == 4"
+    condition: "1 + 2 == 3"
 
   - action: assert
     condition: "10 > 5"

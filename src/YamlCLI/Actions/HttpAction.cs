@@ -21,7 +21,13 @@ namespace YamlCLI.Actions;
 /// </summary>
 public class HttpAction : IStepAction
 {
+    private static readonly HashSet<string> s_allowedProperties = new(StringComparer.Ordinal)
+    {
+        "method", "url", "body", "save-status", "save-body"
+    };
+
     public string ActionType => "http";
+    public IReadOnlySet<string> AllowedProperties => s_allowedProperties;
 
     private static readonly HttpClient SharedClient = new();
     private readonly HttpClient _client;
@@ -37,13 +43,15 @@ public class HttpAction : IStepAction
 
     public async Task ExecuteAsync(StepDefinition step, ExecutionContext context)
     {
+        this.Validate(step);
+
         var method = step.GetRequiredString("method").ToUpperInvariant();
         var url = context.Interpolate(step.GetRequiredString("url"));
         var body = step.GetOptionalString("body");
         var saveStatus = step.GetOptionalString("save-status");
         var saveBody = step.GetOptionalString("save-body");
 
-        Console.WriteLine($"    {method} {url}");
+        context.Console.Message($"{method} {url}");
 
         HttpResponseMessage response;
 
@@ -67,27 +75,27 @@ public class HttpAction : IStepAction
         var statusCode = (int)response.StatusCode;
         var responseBody = await response.Content.ReadAsStringAsync();
 
-        Console.WriteLine($"    Status: {statusCode} {response.StatusCode}");
+        context.Console.Message($"Status: {statusCode} {response.StatusCode}");
 
         if (context.IsVerbose)
         {
             var bodyPreview = responseBody.Length > 200 
                 ? responseBody[..200] + "..." 
                 : responseBody;
-            Console.WriteLine($"    Body: {bodyPreview}");
+            context.Console.Message($"Body: {bodyPreview}");
         }
 
         // Save response values to variables if requested
         if (!string.IsNullOrEmpty(saveStatus))
         {
             context.SetVariable(saveStatus, statusCode);
-            Console.WriteLine($"    Saved status to variable '{saveStatus}'");
+            context.Console.Message($"Saved status to variable '{saveStatus}'");
         }
 
         if (!string.IsNullOrEmpty(saveBody))
         {
             context.SetVariable(saveBody, responseBody);
-            Console.WriteLine($"    Saved body to variable '{saveBody}'");
+            context.Console.Message($"Saved body to variable '{saveBody}'");
         }
     }
 }

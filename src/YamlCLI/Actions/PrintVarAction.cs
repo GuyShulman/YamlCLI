@@ -12,14 +12,19 @@ namespace YamlCLI.Actions;
 /// </summary>
 public class PrintVarAction : IStepAction
 {
+    private static readonly HashSet<string> s_allowedProperties = new(StringComparer.Ordinal) { "name" };
+
     public string ActionType => "print-var";
+    public IReadOnlySet<string> AllowedProperties => s_allowedProperties;
 
     public Task ExecuteAsync(StepDefinition step, ExecutionContext context)
     {
+        this.Validate(step);
+
         var name = step.GetRequiredString("name");
         var value = context.GetVariable(name);
 
-        Console.WriteLine($"    {name} = {value}");
+        context.Console.Message($"{name} = {value}");
 
         return Task.CompletedTask;
     }

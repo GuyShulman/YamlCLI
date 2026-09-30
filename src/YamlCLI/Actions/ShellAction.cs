@@ -20,18 +20,24 @@ namespace YamlCLI.Actions;
 /// </summary>
 public class ShellAction : IStepAction
 {
+    private static readonly HashSet<string> s_allowedProperties = new(StringComparer.Ordinal)
+    {
+        "command", "capture-var", "capture-exit-code", "working-dir", "ignore-error"
+    };
+
     public string ActionType => "shell";
+    public IReadOnlySet<string> AllowedProperties => s_allowedProperties;
 
     public async Task ExecuteAsync(StepDefinition step, ExecutionContext context)
     {
+        this.Validate(step);
+
         var rawCommand = step.GetRequiredString("command");
         var command = context.Interpolate(rawCommand);
 
-        var captureVar = step.GetOptionalString("capture-var")
-            ?? step.GetOptionalString("capture");
+        var captureVar = step.GetOptionalString("capture-var");
         var captureExitCode = step.GetOptionalString("capture-exit-code");
-        var workingDir = step.GetOptionalString("working-dir")
-            ?? step.GetOptionalString("cwd");
+        var workingDir = step.GetOptionalString("working-dir");
         var ignoreError = step.Properties.TryGetValue("ignore-error", out var ie) && Convert.ToBoolean(ie);
 
         if (context.IsDryRun)
