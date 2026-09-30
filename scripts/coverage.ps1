@@ -1,3 +1,7 @@
+param(
+    [switch]$Html
+)
+
 # Runs test suite with code coverage and displays a clean terminal table
 
 Write-Host "Running tests with code coverage..." -ForegroundColor Cyan
@@ -51,3 +55,11 @@ Write-Host ("OVERALL LINE COVERAGE   : {0}% ({1}/{2} lines)" -f $lineRate, $over
 Write-Host ("OVERALL BRANCH COVERAGE : {0}%" -f $branchRate) -ForegroundColor Cyan
 Write-Host ("=" * 75) -ForegroundColor DarkGray
 Write-Host ""
+
+if ($Html) {
+    Write-Host "Generating HTML coverage report..." -ForegroundColor Cyan
+    reportgenerator -reports:$xmlFile.FullName -targetdir:coverage -reporttypes:Html | Out-Null
+    Write-Host "Report generated at: coverage/index.html" -ForegroundColor Green
+    Write-Host "Opening in default browser..." -ForegroundColor Yellow
+    Start-Process (Resolve-Path "coverage/index.html")
+}
