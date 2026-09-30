@@ -159,6 +159,152 @@ public class StepRunnerTests
         Assert.Contains("1 skipped", output);
     }
 
+    [Fact]
+    public async Task StepExecutor_ExecutesStepSuccessfully()
+    {
+        var executor = new StepExecutor();
+        var context = new ExecutionContext();
+        var step = new StepDefinition
+        {
+            Action = "set-var",
+            Properties = new Dictionary<string, object>
+            {
+                ["name"] = "foo",
+                ["value"] = "bar"
+            }
+        };
+
+        await CaptureOutput(async () =>
+        {
+            await executor.ExecuteStepAsync(step, context);
+            return true;
+        });
+
+        Assert.Equal("bar", context.GetVariable("foo"));
+    }
+
+    [Fact]
+    public async Task StepExecutor_DryRunDoesNotExecute()
+    {
+        var executor = new StepExecutor();
+        var context = new ExecutionContext { IsDryRun = true };
+        var step = new StepDefinition
+        {
+            Action = "set-var",
+            Properties = new Dictionary<string, object>
+            {
+                ["name"] = "dryKey",
+                ["value"] = "dryVal"
+            }
+        };
+
+        await CaptureOutput(async () =>
+        {
+            await executor.ExecuteStepAsync(step, context);
+            return true;
+        });
+
+        Assert.False(context.TryGetVariable("dryKey", out _));
+    }
+
+    [Fact]
+    public async Task ExecutionContext_CustomStepExecutor_DelegatesCorrectly()
+    {
+        var mockExecutor = new MockStepExecutor();
+        var context = new ExecutionContext { Executor = mockExecutor };
+        var step = new StepDefinition { Action = "dummy" };
+
+        await context.ExecuteStepAsync(step);
+
+        Assert.Single(mockExecutor.ExecutedSteps);
+        Assert.Same(step, mockExecutor.ExecutedSteps[0]);
+    }
+
+    private class MockStepExecutor : IStepExecutor
+    {
+        public List<StepDefinition> ExecutedSteps { get; } = new();
+
+        public Task ExecuteStepAsync(StepDefinition step, ExecutionContext context)
+        {
+            ExecutedSteps.Add(step);
+            return Task.CompletedTask;
+        }
+
+        public Task ExecuteStepsAsync(List<StepDefinition> steps, ExecutionContext context)
+        {
+            ExecutedSteps.AddRange(steps);
+            return Task.CompletedTask;
+        }
+    }
+
+    [Fact]
+    public async Task StepRunner_ActionThrowsUnexpectedException_FailsAndPrintsSummary()
+    {
+        var registry = new ActionRegistry();
+        registry.RegisterFactory("crash", () => new CrashingAction());
+        var console = new ConsoleWriter();
+        var runner = new StepRunner(registry, console);
+        var context = new ExecutionContext();
+        var steps = new List<StepDefinition> { new StepDefinition { Action = "crash" } };
+
+        var sw = new StringWriter();
+        var origOut = Console.Out;
+        Console.SetOut(sw);
+        try
+        {
+            var success = await runner.RunAsync(steps, context);
+            Assert.False(success);
+            var output = sw.ToString();
+            Assert.Contains("failed with unexpected error: Unexpected crash", output);
+            Assert.Contains("Result: FAILED", output);
+        }
+        finally
+        {
+            Console.SetOut(origOut);
+        }
+    }
+
+    [Fact]
+    public async Task StepRunner_DryRun_WithNestedSteps_PrintsLabels()
+    {
+        var registry = new ActionRegistry();
+        var console = new ConsoleWriter();
+        var runner = new StepRunner(registry, console);
+        var context = new ExecutionContext { IsDryRun = true };
+
+        var stepWithList = new StepDefinition { Action = "parallel" };
+        stepWithList.Properties["steps"] = new List<StepDefinition> { new StepDefinition { Action = "log" } };
+
+        var stepWithSingle = new StepDefinition { Action = "retry" };
+        stepWithSingle.Properties["step"] = new StepDefinition { Action = "log" };
+
+        var steps = new List<StepDefinition> { stepWithList, stepWithSingle };
+
+        var sw = new StringWriter();
+        var origOut = Console.Out;
+        Console.SetOut(sw);
+        try
+        {
+            var success = await runner.RunAsync(steps, context);
+            Assert.True(success);
+            var output = sw.ToString();
+            Assert.Contains("[1 nested step(s)]", output);
+            Assert.Contains("[nested: log]", output);
+        }
+        finally
+        {
+            Console.SetOut(origOut);
+        }
+    }
+
+    private class CrashingAction : IStepAction
+    {
+        public string ActionType => "crash";
+        public IReadOnlySet<string> AllowedProperties => new HashSet<string>();
+        public Task ExecuteAsync(StepDefinition step, ExecutionContext context) =>
+            throw new InvalidOperationException("Unexpected crash");
+    }
+
     // --- Helper methods ---
 
     private static async Task<(bool success, ExecutionContext context)> RunYaml(

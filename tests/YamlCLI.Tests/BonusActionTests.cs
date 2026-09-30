@@ -1,4 +1,5 @@
 using YamlCLI.Actions;
+using YamlCLI.Execution;
 using YamlCLI.Models;
 using ExecutionContext = YamlCLI.Models.ExecutionContext;
 
@@ -69,6 +70,21 @@ public class BonusActionTests : IDisposable
     }
 
     [Fact]
+    public async Task ParallelAction_MultipleStepsFail_CombinesErrorMessages()
+    {
+        var action = new ParallelAction();
+        var failingStep1 = CreateStep("assert", ("condition", "1 == 2"));
+        var failingStep2 = CreateStep("assert", ("condition", "3 == 4"));
+
+        var parentStep = CreateStep("parallel", ("steps", new List<StepDefinition> { failingStep1, failingStep2 }));
+
+        var ex = await Assert.ThrowsAsync<StepExecutionException>(
+            () => CaptureConsoleOutput(() => action.ExecuteAsync(parentStep, _context)));
+
+        Assert.Contains("Multiple parallel steps failed", ex.Message);
+    }
+
+    [Fact]
     public async Task ParallelAction_DryRun_DoesNotExecute()
     {
         var action = new ParallelAction();
@@ -103,7 +119,7 @@ public class BonusActionTests : IDisposable
     {
         var action = new RetryAction();
         var failingStep = CreateStep("assert", ("condition", "1 == 0"));
-        var parentStep = CreateStep("retry", ("attempts", 2), ("delay", 10), ("step", failingStep));
+        var parentStep = CreateStep("retry", ("attempts", 2), ("delay-ms", 10), ("step", failingStep));
 
         var ex = await Assert.ThrowsAsync<StepExecutionException>(
             () => CaptureConsoleOutput(() => action.ExecuteAsync(parentStep, _context)));
@@ -379,6 +395,249 @@ public class BonusActionTests : IDisposable
         Assert.Contains("import", actions);
 
         Assert.Equal(11, actions.Count);
+    }
+
+    // ==========================================
+    // STRICT SCHEMA VALIDATION TESTS
+    // ==========================================
+
+    [Theory]
+    [InlineData("parallel", "actions")]
+    [InlineData("retry", "count")]
+    [InlineData("retry", "delay")]
+    [InlineData("retry", "retries")]
+    [InlineData("condition", "condition")]
+    [InlineData("import", "path")]
+    [InlineData("shell", "cwd")]
+    [InlineData("shell", "capture")]
+    public async Task Actions_RejectUnknownOrAliasedProperties(string actionType, string invalidProperty)
+    {
+        var registry = new ActionRegistry();
+        var action = registry.GetAction(actionType);
+        var step = CreateStep(actionType, (invalidProperty, "dummy"));
+
+        var ex = await Assert.ThrowsAsync<StepExecutionException>(
+            () => action.ExecuteAsync(step, _context));
+
+        Assert.Contains($"Unknown property '{invalidProperty}' for action '{actionType}'", ex.Message);
+        Assert.Contains("Allowed properties:", ex.Message);
+    }
+
+    // ==========================================
+    // COVERAGE COMPLETION TESTS
+    // ==========================================
+
+    [Fact]
+    public async Task ConditionAction_EmptyThenAndElse_ThrowsException()
+    {
+        var action = new ConditionAction();
+        var step = CreateStep("condition", ("if", "1 == 1"));
+
+        var ex = await Assert.ThrowsAsync<StepExecutionException>(
+            () => action.ExecuteAsync(step, _context));
+
+        Assert.Contains("requires 'then' to execute", ex.Message);
+    }
+
+    [Fact]
+    public async Task ConditionAction_DryRun_WithThenAndElse_PrintsDryRunInfo()
+    {
+        var context = new YamlCLI.Models.ExecutionContext { IsDryRun = true, Console = new ConsoleWriter() };
+        var action = new ConditionAction();
+        var step = CreateStep("condition",
+            ("if", "1 == 1"),
+            ("then", new List<StepDefinition> { CreateStep("log", ("message", "true")) }),
+            ("else", new List<StepDefinition> { CreateStep("log", ("message", "false")) }));
+
+        var output = await CaptureConsoleOutput(() => action.ExecuteAsync(step, context));
+        Assert.Contains("[condition] If: 1 == 1", output);
+        Assert.Contains("[then] 1 step(s)", output);
+        Assert.Contains("[else] 1 step(s)", output);
+    }
+
+    [Fact]
+    public async Task ConditionAction_Verbose_LogsConditionEvaluation()
+    {
+        var context = new YamlCLI.Models.ExecutionContext { IsVerbose = true, Console = new ConsoleWriter() };
+        var action = new ConditionAction();
+        var step = CreateStep("condition",
+            ("if", "1 == 1"),
+            ("then", new List<StepDefinition> { CreateStep("log", ("message", "true")) }));
+
+        var output = await CaptureConsoleOutput(() => action.ExecuteAsync(step, context));
+        Assert.Contains("Condition \"1 == 1\" evaluated to True", output);
+    }
+
+    [Fact]
+    public async Task RetryAction_NegativeDelayMs_ThrowsException()
+    {
+        var action = new RetryAction();
+        var step = CreateStep("retry",
+            ("step", CreateStep("log", ("message", "hi"))),
+            ("delay-ms", -10));
+
+        var ex = await Assert.ThrowsAsync<StepExecutionException>(
+            () => action.ExecuteAsync(step, _context));
+
+        Assert.Contains("delay-ms must be non-negative", ex.Message);
+    }
+
+    [Fact]
+    public async Task RetryAction_DryRun_ExecutesDryRun()
+    {
+        var context = new YamlCLI.Models.ExecutionContext { IsDryRun = true, Console = new ConsoleWriter() };
+        var action = new RetryAction();
+        var step = CreateStep("retry",
+            ("attempts", 2),
+            ("delay-ms", 100),
+            ("step", CreateStep("log", ("message", "hello"))));
+
+        var output = await CaptureConsoleOutput(() => action.ExecuteAsync(step, context));
+        Assert.Contains("[retry] Will attempt up to 2 times with 100ms delay", output);
+    }
+
+    [Fact]
+    public async Task RetryAction_MultipleAttempts_Verbose_LogsRetryAttempts()
+    {
+        var context = new YamlCLI.Models.ExecutionContext { IsVerbose = true, Console = new ConsoleWriter() };
+        var action = new RetryAction();
+        var step = CreateStep("retry",
+            ("attempts", 2),
+            ("delay-ms", 5),
+            ("step", CreateStep("assert", ("condition", "1 == 2"))));
+
+        var output = await CaptureConsoleOutput(async () =>
+        {
+            await Assert.ThrowsAsync<StepExecutionException>(() => action.ExecuteAsync(step, context));
+        });
+
+        Assert.Contains("Retry attempt 2/2...", output);
+    }
+
+    [Fact]
+    public async Task ImportAction_DryRun_PrintsLoadingMessage()
+    {
+        var tempFile = Path.GetTempFileName();
+        File.WriteAllText(tempFile, "steps:\n  - action: log\n    message: imported\n");
+        try
+        {
+            var context = new YamlCLI.Models.ExecutionContext { IsDryRun = true, Console = new ConsoleWriter() };
+            var action = new ImportAction();
+            var step = CreateStep("import", ("file", tempFile));
+
+            var output = await CaptureConsoleOutput(() => action.ExecuteAsync(step, context));
+            Assert.Contains("[import] Loading steps from", output);
+        }
+        finally
+        {
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+        }
+    }
+
+    [Fact]
+    public async Task ParallelAction_NonStepExecutionException_WrapsInStepExecutionException()
+    {
+        var registry = new ActionRegistry();
+        registry.RegisterFactory("fail-unhandled", () => new UnhandledExceptionAction());
+        var executor = new StepExecutor(registry);
+        var context = new YamlCLI.Models.ExecutionContext { Executor = executor };
+
+        var action = new ParallelAction();
+        var step = CreateStep("parallel",
+            ("steps", new List<StepDefinition> { CreateStep("fail-unhandled") }));
+
+        var ex = await Assert.ThrowsAsync<StepExecutionException>(
+            () => action.ExecuteAsync(step, context));
+
+        Assert.Contains("One or more parallel steps failed", ex.Message);
+    }
+
+    [Fact]
+    public async Task ShellAction_DryRun_PrintsCommandWithoutRunning()
+    {
+        var context = new YamlCLI.Models.ExecutionContext { IsDryRun = true, Console = new ConsoleWriter() };
+        var action = new ShellAction();
+        var step = CreateStep("shell", ("command", "echo test"));
+
+        var output = await CaptureConsoleOutput(() => action.ExecuteAsync(step, context));
+        Assert.Contains("[shell] Command: echo test", output);
+    }
+
+    [Fact]
+    public async Task ShellAction_WorkingDir_RelativeAndAbsolute()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "YamlCLI_TestDir_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var action = new ShellAction();
+
+            // Absolute working dir
+            var stepAbsolute = CreateStep("shell",
+                ("command", OperatingSystem.IsWindows() ? "cd" : "pwd"),
+                ("working-dir", tempDir),
+                ("capture-var", "out1"));
+            await action.ExecuteAsync(stepAbsolute, _context);
+            Assert.Contains(Path.GetFileName(tempDir), _context.GetVariable("out1").ToString());
+
+            // Relative working dir with BasePath
+            var subDirName = "sub";
+            var subDir = Path.Combine(tempDir, subDirName);
+            Directory.CreateDirectory(subDir);
+
+            _context.BasePath = tempDir;
+            var stepRelative = CreateStep("shell",
+                ("command", OperatingSystem.IsWindows() ? "cd" : "pwd"),
+                ("working-dir", subDirName),
+                ("capture-var", "out2"));
+            await action.ExecuteAsync(stepRelative, _context);
+            Assert.Contains(subDirName, _context.GetVariable("out2").ToString());
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public async Task ShellAction_Stderr_CapturedAndLogged()
+    {
+        var action = new ShellAction();
+        // A command that writes to stderr and fails
+        var cmd = OperatingSystem.IsWindows()
+            ? "cmd /c \"echo error-msg 1>&2 && exit 1\""
+            : "sh -c 'echo error-msg >&2 && exit 1'";
+
+        var step = CreateStep("shell",
+            ("command", cmd),
+            ("ignore-error", true));
+
+        var output = await CaptureConsoleOutput(() => action.ExecuteAsync(step, _context));
+        Assert.Contains("error-msg", output);
+    }
+
+    [Fact]
+    public async Task ShellAction_ProcessStartFails_ThrowsStepExecutionException()
+    {
+        var action = new ShellAction();
+        var step = CreateStep("shell",
+            ("command", "echo hello"),
+            ("working-dir", "Z:\\NonExistentDirectory_YamlCLI_123456789"));
+
+        var ex = await Assert.ThrowsAsync<StepExecutionException>(
+            () => action.ExecuteAsync(step, _context));
+
+        Assert.Contains("Failed to execute shell command", ex.Message);
+    }
+
+    private class UnhandledExceptionAction : IStepAction
+    {
+        public string ActionType => "fail-unhandled";
+        public IReadOnlySet<string> AllowedProperties => new HashSet<string>();
+        public Task ExecuteAsync(StepDefinition step, YamlCLI.Models.ExecutionContext context)
+        {
+            throw new InvalidOperationException("Unhandled crash");
+        }
     }
 
     // --- Helper methods ---

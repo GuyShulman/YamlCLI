@@ -167,4 +167,129 @@ public class YamlParserTests
     {
         Assert.Throws<FileNotFoundException>(() => _parser.ParseFile("nonexistent.yaml"));
     }
+
+    [Fact]
+    public void ParseYaml_StepsNotAList_ThrowsException()
+    {
+        var yaml = """
+            steps: "string-value-not-a-list"
+            """;
+
+        var ex = Assert.Throws<StepExecutionException>(() => _parser.ParseYaml(yaml));
+        Assert.Contains("The 'steps' key must contain a list of actions", ex.Message);
+    }
+
+    [Fact]
+    public void ParseYaml_StepNotADictionary_ThrowsException()
+    {
+        var yaml = """
+            steps:
+              - "just-a-string-not-a-mapping"
+            """;
+
+        var ex = Assert.Throws<StepExecutionException>(() => _parser.ParseYaml(yaml));
+        Assert.Contains("Invalid step format", ex.Message);
+    }
+
+    [Fact]
+    public void ParseYaml_StepActionNull_ThrowsException()
+    {
+        var yaml = """
+            steps:
+              - action:
+                message: "No action"
+            """;
+
+        var ex = Assert.Throws<StepExecutionException>(() => _parser.ParseYaml(yaml));
+        Assert.Contains("action", ex.Message);
+    }
+
+    [Fact]
+    public void ParseYaml_NullPropertyValue_ConvertsToEmptyString()
+    {
+        var yaml = """
+            steps:
+              - action: log
+                message:
+            """;
+
+        var steps = _parser.ParseYaml(yaml);
+        Assert.Single(steps);
+        Assert.Equal(string.Empty, steps[0].Properties["message"]);
+    }
+
+    [Fact]
+    public void ParseYaml_RegularListProperty_ConvertsToList()
+    {
+        var yaml = """
+            steps:
+              - action: log
+                items:
+                  - "item1"
+                  - "item2"
+            """;
+
+        var steps = _parser.ParseYaml(yaml);
+        Assert.Single(steps);
+        var items = Assert.IsType<List<object>>(steps[0].Properties["items"]);
+        Assert.Equal(2, items.Count);
+        Assert.Equal("item1", items[0]);
+    }
+
+    [Fact]
+    public void ParseYaml_RegularDictionaryProperty_ConvertsToDictionary()
+    {
+        var yaml = """
+            steps:
+              - action: log
+                meta:
+                  env: "prod"
+                  region: "us-east"
+            """;
+
+        var steps = _parser.ParseYaml(yaml);
+        Assert.Single(steps);
+        var meta = Assert.IsType<Dictionary<string, object>>(steps[0].Properties["meta"]);
+        Assert.Equal("prod", meta["env"]);
+        Assert.Equal("us-east", meta["region"]);
+    }
+
+    [Fact]
+    public void ParseYaml_SingleNestedStep_ConvertsToStepDefinition()
+    {
+        var yaml = """
+            steps:
+              - action: retry
+                step:
+                  action: log
+                  message: "Nested message"
+            """;
+
+        var steps = _parser.ParseYaml(yaml);
+        Assert.Single(steps);
+        var nested = Assert.IsType<StepDefinition>(steps[0].Properties["step"]);
+        Assert.Equal("log", nested.Action);
+        Assert.Equal("Nested message", nested.GetRequiredString("message"));
+    }
+
+    [Fact]
+    public void ParseYaml_NestedStepsList_ParsesAsStepDefinitions()
+    {
+        var yaml = """
+            steps:
+              - action: parallel
+                steps:
+                  - action: log
+                    message: "Child 1"
+                  - action: delay
+                    duration: 50
+            """;
+
+        var steps = _parser.ParseYaml(yaml);
+        Assert.Single(steps);
+        var nestedSteps = Assert.IsType<List<StepDefinition>>(steps[0].Properties["steps"]);
+        Assert.Equal(2, nestedSteps.Count);
+        Assert.Equal("log", nestedSteps[0].Action);
+        Assert.Equal("delay", nestedSteps[1].Action);
+    }
 }
